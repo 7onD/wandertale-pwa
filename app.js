@@ -28,7 +28,7 @@ const MAX_SESSION_HIST = 20;   // deduplicate last N place names
 const state = {
   walking:       false,
   loading:       false,
-  watchId:       null,
+  pollInterval:  null,    // iOS-safe GPS polling interval
   lastRequestPos: null,   // { lat, lon } of the last successful API call
   sessionPlaces: [],      // deduplication history (place names)
   audioCtx:      null,
@@ -171,11 +171,22 @@ function escHtml(str) {
 }
 
 // ── Audio helpers ─────────────────────────────────────────────────────────────
-function getAudioCtx() {
+
+// Unlock AudioContext on iOS — must be called inside a user gesture handler
+async function unlockAudio() {
   if (!state.audioCtx) {
     state.audioCtx = new (window.AudioContext || window.webkitAudioContext)();
   }
-  return state.audioCtx;
+  if (state.audioCtx.state === 'suspended') {
+    await state.audioCtx.resume();
+  }
+  // Play 0.1s of silence to fully unlock iOS audio
+  const buffer = state.audioCtx.createBuffer(1, 1, 22050);
+  const source = state.audioCtx.createBufferSource();
+  source.buffer = buffer;
+  source.connect(state.audioCtx.destination);
+  source.start(0);
+  dbg('Audio unlocked: ' + state.audioCtx.state);
 }
 
 function stopAllAudio() {
@@ -192,29 +203,26 @@ function stopAllAudio() {
   state.audioPlaying = false;
 }
 
-function playMp3Buffer(arrayBuffer) {
-  return new Promise((resolve, reject) => {
-    const ctx = getAudioCtx();
-
-    ctx.decodeAudioData(arrayBuffer, (decoded) => {
-      const source = ctx.createBufferSource();
-      source.buffer = decoded;
-      source.connect(ctx.destination);
-
-      source.onended = () => {
-        state.currentSource = null;
-        state.audioPlaying  = false;
-        resolve();
-      };
-
-      state.currentSource = source;
-      state.audioPlaying  = true;
-      source.start(0);
-    }, (err) => {
-      state.audioPlaying = false;
-      reject(err);
-    });
-  });
+async function playAudioBuffer(arrayBuffer) {
+  if (!state.audioCtx) return;
+  try {
+    const decoded = await state.audioCtx.decodeAudioData(arrayBuffer);
+    if (state.currentSource) {
+      state.currentSource.stop();
+      state.currentSource.disconnect();
+    }
+    const source = state.audioCtx.createBufferSource();
+    source.buffer = decoded;
+    source.connect(state.audioCtx.destination);
+    source.onended = () => { state.audioPlaying = false; };
+    source.start(0);
+    state.currentSource = source;
+    state.audioPlaying = true;
+    dbg('Playing audio, duration: ' + decoded.duration.toFixed(1) + 's');
+  } catch (err) {
+    dbg('Audio decode error: ' + err.message);
+    state.audioPlaying = false;
+  }
 }
 
 function speakText(text) {
@@ -291,7 +299,7 @@ async function fetchNarration(lat, lon) {
     updateStats();
 
     // Wait for audio to finish before allowing next request
-    await playMp3Buffer(arrayBuffer);
+    await playAudioBuffer(arrayBuffer);
 
     if (state.walking) {
       setStatus('Идём... GPS активен', 'active');
@@ -366,7 +374,7 @@ function isPlaceSeen(placeName) {
 }
 
 // ── GPS position handler ──────────────────────────────────────────────────────
-function onPosition(pos) {
+function onPositionUpdate(pos) {
   const { latitude: lat, longitude: lon } = pos.coords;
   dbg('GPS ok: ' + lat.toFixed(4) + ',' + lon.toFixed(4));
 
@@ -388,26 +396,32 @@ function onPosition(pos) {
   fetchNarration(lat, lon);
 }
 
-function onPositionError(err) {
-  dbg('GPS error: ' + err.message + ' code:' + err.code);
-  let msg;
-  switch (err.code) {
-    case err.PERMISSION_DENIED:
-      msg = 'Доступ к геолокации запрещён. Разрешите в настройках браузера.';
-      break;
-    case err.POSITION_UNAVAILABLE:
-      msg = 'Геолокация недоступна. Проверьте GPS.';
-      break;
-    case err.TIMEOUT:
-      msg = 'Время ожидания геолокации истекло.';
-      break;
-    default:
-      msg = 'Неизвестная ошибка геолокации.';
+// ── iOS-safe GPS polling (getCurrentPosition loop) ────────────────────────────
+function startGPSPolling() {
+  getPosition();
+  state.pollInterval = setInterval(getPosition, 15000);
+}
+
+function getPosition() {
+  navigator.geolocation.getCurrentPosition(
+    (pos) => onPositionUpdate(pos),
+    (err) => {
+      dbg('GPS error: ' + err.message + ' code:' + err.code);
+      // Don't stop polling on error — just skip this cycle
+    },
+    {
+      enableHighAccuracy: false,
+      timeout: 10000,
+      maximumAge: 20000,
+    }
+  );
+}
+
+function stopGPSPolling() {
+  if (state.pollInterval) {
+    clearInterval(state.pollInterval);
+    state.pollInterval = null;
   }
-  setStatus(msg, 'error');
-  setButtonState('idle');
-  state.walking = false;
-  state.watchId = null;
 }
 
 // ── Toggle walk (main button) ─────────────────────────────────────────────────
@@ -419,38 +433,28 @@ function toggleWalk() {
   }
 }
 
-function startWalk() {
+async function startWalk() {
   if (!('geolocation' in navigator)) {
     setStatus('Геолокация не поддерживается этим браузером.', 'error');
     return;
   }
 
+  // Unlock audio on iOS — must happen inside user tap handler
+  await unlockAudio();
+
   setStatus('Получение координат...', 'loading');
   setButtonState('loading');
-  dbg('Requesting GPS permission...');
-
-  state.walkId = navigator.geolocation.watchPosition(
-    onPosition,
-    onPositionError,
-    {
-      enableHighAccuracy: true,
-      maximumAge:         10000,
-      timeout:            15000,
-    }
-  );
+  dbg('Starting GPS polling...');
 
   state.walking = true;
-  state.watchId = state.walkId;
   setButtonState('active');
   setStatus('GPS активен. Начните движение...', 'active');
+
+  startGPSPolling();
 }
 
 function stopWalk() {
-  if (state.watchId !== null) {
-    navigator.geolocation.clearWatch(state.watchId);
-    state.watchId = null;
-  }
-
+  stopGPSPolling();
   stopAllAudio();
 
   state.walking        = false;
