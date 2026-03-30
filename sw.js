@@ -1,4 +1,4 @@
-const CACHE_NAME = 'wandertale-shell-v1';
+const CACHE_NAME = 'wandertale-v2';
 
 const APP_SHELL = [
   '/',
@@ -19,14 +19,10 @@ self.addEventListener('install', (event) => {
 });
 
 // ── Activate: remove old caches ───────────────────────────────────────────────
-self.addEventListener('activate', (event) => {
+self.addEventListener('activate', event => {
   event.waitUntil(
-    caches.keys().then((keys) =>
-      Promise.all(
-        keys
-          .filter((key) => key !== CACHE_NAME)
-          .map((key) => caches.delete(key))
-      )
+    caches.keys().then(keys =>
+      Promise.all(keys.filter(k => k !== CACHE_NAME).map(k => caches.delete(k)))
     )
   );
   self.clients.claim();
