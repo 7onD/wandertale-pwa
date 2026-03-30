@@ -28,38 +28,18 @@ self.addEventListener('activate', event => {
   self.clients.claim();
 });
 
-// ── Fetch: cache-first for shell, network-only for /narrate ───────────────────
-self.addEventListener('fetch', (event) => {
+// ── Fetch: network-only for external, cache-first for same-origin ────────────
+self.addEventListener('fetch', event => {
   const url = new URL(event.request.url);
 
-  // Network-only for API calls — never cache narration responses
-  if (url.pathname === '/narrate') {
+  // Always pass external requests (API calls) directly to network
+  if (url.origin !== self.location.origin) {
     event.respondWith(fetch(event.request));
     return;
   }
 
-  // Cache-first for app shell assets
+  // For same-origin requests — serve from cache, fallback to network
   event.respondWith(
-    caches.match(event.request).then((cached) => {
-      if (cached) return cached;
-
-      return fetch(event.request).then((response) => {
-        // Only cache valid same-origin responses
-        if (
-          response &&
-          response.status === 200 &&
-          response.type === 'basic'
-        ) {
-          const clone = response.clone();
-          caches.open(CACHE_NAME).then((cache) => cache.put(event.request, clone));
-        }
-        return response;
-      });
-    }).catch(() => {
-      // Offline fallback for navigation requests
-      if (event.request.mode === 'navigate') {
-        return caches.match('/index.html');
-      }
-    })
+    caches.match(event.request).then(cached => cached || fetch(event.request))
   );
 });
