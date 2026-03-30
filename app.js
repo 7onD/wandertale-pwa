@@ -5,9 +5,22 @@
 
 const API_BASE = window.location.hostname === 'localhost'
   ? 'http://localhost:3000'
-  : 'wandertale-backend-production.up.railway.app';
+  : 'https://YOUR_RAILWAY_URL';
 
 const BACKEND_URL      = `${API_BASE}/narrate`;
+
+// ── Debug logger ──────────────────────────────────────────────────────────────
+function dbg(msg) {
+  console.log(msg);
+  const el = document.getElementById('debug-log');
+  if (el) {
+    const line = document.createElement('div');
+    line.textContent = new Date().toLocaleTimeString() + ' — ' + msg;
+    el.prepend(line);
+  }
+}
+
+dbg('App started. API_BASE: ' + API_BASE);
 const MIN_DISTANCE_M   = 80;   // metres before we fire a new request
 const MAX_SESSION_HIST = 20;   // deduplicate last N place names
 
@@ -231,6 +244,7 @@ async function fetchNarration(lat, lon) {
   setButtonState('loading');
   setStatus('Запрос к серверу...', 'loading');
 
+  dbg('Fetching: ' + API_BASE + '/narrate');
   let response;
   try {
     response = await fetch(BACKEND_URL, {
@@ -239,11 +253,14 @@ async function fetchNarration(lat, lon) {
       body:    JSON.stringify({ lat, lon }),
     });
   } catch (networkErr) {
+    dbg('Fetch error: ' + networkErr.message);
     state.loading = false;
     setButtonState('active');
     setStatus('Нет связи с сервером. Проверьте интернет-соединение.', 'error');
     return;
   }
+
+  dbg('Response status: ' + response.status + ' type: ' + response.headers.get('content-type'));
 
   const contentType = response.headers.get('content-type') || '';
 
@@ -306,6 +323,14 @@ async function fetchNarration(lat, lon) {
   const narration  = data.narration || '';
   const audioFailed = data.audio === false;
 
+  if (isPlaceSeen(placeName)) {
+    dbg('Skipped (already seen): ' + placeName);
+    state.loading = false;
+    setButtonState('active');
+    if (state.walking) setStatus('Идём... GPS активен', 'active');
+    return;
+  }
+
   addToHistory(placeName);
   state.lastRequestPos = { lat, lon };
   state.loading = false;
@@ -343,6 +368,7 @@ function isPlaceSeen(placeName) {
 // ── GPS position handler ──────────────────────────────────────────────────────
 function onPosition(pos) {
   const { latitude: lat, longitude: lon } = pos.coords;
+  dbg('GPS ok: ' + lat.toFixed(4) + ',' + lon.toFixed(4));
 
   // Don't fire if audio is still playing or another request is in flight
   if (state.loading || state.audioPlaying) return;
@@ -355,6 +381,7 @@ function onPosition(pos) {
       lat,
       lon
     );
+    dbg('Distance from last: ' + dist.toFixed(0) + 'm (min 80m)');
     if (dist < MIN_DISTANCE_M) return;
   }
 
@@ -362,6 +389,7 @@ function onPosition(pos) {
 }
 
 function onPositionError(err) {
+  dbg('GPS error: ' + err.message + ' code:' + err.code);
   let msg;
   switch (err.code) {
     case err.PERMISSION_DENIED:
@@ -399,6 +427,7 @@ function startWalk() {
 
   setStatus('Получение координат...', 'loading');
   setButtonState('loading');
+  dbg('Requesting GPS permission...');
 
   state.walkId = navigator.geolocation.watchPosition(
     onPosition,
