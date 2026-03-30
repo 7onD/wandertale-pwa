@@ -47,12 +47,11 @@ const cardInner = document.getElementById('cardInner');
 const sessionStats = document.getElementById('sessionStats');
 const statsText    = document.getElementById('statsText');
 
-// ── Service worker registration ───────────────────────────────────────────────
+// ── Service worker — unregister all to avoid fetch interception ───────────────
 if ('serviceWorker' in navigator) {
-  window.addEventListener('load', () => {
-    navigator.serviceWorker.register('./sw.js').catch((err) => {
-      console.warn('SW registration failed:', err);
-    });
+  navigator.serviceWorker.getRegistrations().then(registrations => {
+    registrations.forEach(reg => reg.unregister());
+    dbg('SW unregistered: ' + registrations.length + ' workers removed');
   });
 }
 
@@ -429,11 +428,30 @@ function toggleWalk() {
   }
 }
 
+async function unlockAudio() {
+  try {
+    const AudioCtx = window.AudioContext || window.webkitAudioContext;
+    if (!AudioCtx) return;
+    const ctx = new AudioCtx();
+    const buf = ctx.createBuffer(1, 1, 22050);
+    const src = ctx.createBufferSource();
+    src.buffer = buf;
+    src.connect(ctx.destination);
+    src.start(0);
+    await ctx.close();
+    dbg('Audio unlocked');
+  } catch (e) {
+    dbg('Audio unlock error: ' + e.message);
+  }
+}
+
 async function startWalk() {
   if (!('geolocation' in navigator)) {
     setStatus('Геолокация не поддерживается этим браузером.', 'error');
     return;
   }
+
+  await unlockAudio();
 
   setStatus('Получение координат...', 'loading');
   setButtonState('loading');
