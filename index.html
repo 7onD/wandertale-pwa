@@ -1,0 +1,63 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <meta name="apple-mobile-web-app-capable" content="yes" />
+  <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent" />
+  <meta name="apple-mobile-web-app-title" content="WanderTale" />
+  <meta name="theme-color" content="#2E75B6" />
+
+  <title>WanderTale</title>
+
+  <link rel="manifest" href="manifest.json" />
+  <link rel="stylesheet" href="style.css" />
+</head>
+<body>
+
+  <div class="app">
+
+    <header class="app-header">
+      <div class="logo">
+        <span class="logo-icon">🗺️</span>
+        <h1 class="logo-title">WanderTale</h1>
+      </div>
+      <p class="logo-sub">Истории мест вокруг тебя</p>
+    </header>
+
+    <main class="app-main">
+
+      <div class="status-box" id="statusBox">
+        <span class="status-dot" id="statusDot"></span>
+        <span class="status-text" id="statusText">Нажмите кнопку, чтобы начать</span>
+      </div>
+
+      <button class="btn-main" id="mainBtn" onclick="toggleWalk()">
+        <span class="btn-icon" id="btnIcon">▶</span>
+        <span class="btn-label" id="btnLabel">Начать прогулку</span>
+      </button>
+
+      <div class="place-card" id="placeCard" aria-live="polite">
+        <div class="card-inner" id="cardInner">
+          <div class="card-placeholder">
+            <span class="card-placeholder-icon">📍</span>
+            <p>Здесь появится информация о ближайшем месте</p>
+          </div>
+        </div>
+      </div>
+
+      <div class="session-stats" id="sessionStats" hidden>
+        <span id="statsText"></span>
+      </div>
+
+    </main>
+
+    <footer class="app-footer">
+      <p>Двигайтесь — и мир заговорит с вами</p>
+    </footer>
+
+  </div>
+
+  <script src="app.js"></script>
+</body>
+</html>
