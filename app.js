@@ -203,10 +203,25 @@ function stopAllAudio() {
   state.audioPlaying = false;
 }
 
-async function playAudioBuffer(arrayBuffer) {
-  if (!state.audioCtx) return;
+async function playAudioBuffer(arrayBuffer, fallbackText) {
+  dbg('arrayBuffer size: ' + arrayBuffer.byteLength + ' bytes');
+  if (!state.audioCtx) {
+    dbg('ERROR: audioCtx is null');
+    return;
+  }
+  dbg('audioCtx state: ' + state.audioCtx.state);
+
+  // Resume context if iOS suspended it
+  if (state.audioCtx.state === 'suspended') {
+    await state.audioCtx.resume();
+    dbg('audioCtx resumed');
+  }
+
   try {
-    const decoded = await state.audioCtx.decodeAudioData(arrayBuffer);
+    // iOS requires a fresh copy of the buffer for decodeAudioData
+    const decoded = await state.audioCtx.decodeAudioData(arrayBuffer.slice(0));
+    dbg('Decoded ok, duration: ' + decoded.duration.toFixed(1) + 's, channels: ' + decoded.numberOfChannels);
+
     if (state.currentSource) {
       state.currentSource.stop();
       state.currentSource.disconnect();
@@ -218,10 +233,14 @@ async function playAudioBuffer(arrayBuffer) {
     source.start(0);
     state.currentSource = source;
     state.audioPlaying = true;
-    dbg('Playing audio, duration: ' + decoded.duration.toFixed(1) + 's');
   } catch (err) {
-    dbg('Audio decode error: ' + err.message);
+    dbg('decodeAudioData FAILED: ' + err.name + ' — trying speechSynthesis fallback');
     state.audioPlaying = false;
+    if (fallbackText && window.speechSynthesis) {
+      const utter = new SpeechSynthesisUtterance(fallbackText);
+      utter.lang = 'ru-RU';
+      speechSynthesis.speak(utter);
+    }
   }
 }
 
@@ -274,7 +293,9 @@ async function fetchNarration(lat, lon) {
 
   // ── Audio/mpeg response — play via Web Audio API ─────────────────────────
   if (contentType.includes('audio/mpeg')) {
-    const placeName = response.headers.get('x-place') || 'Место рядом';
+    const placeName    = response.headers.get('x-place') || 'Место рядом';
+    const rawNarration = response.headers.get('x-narration');
+    const fallbackText = rawNarration ? decodeURIComponent(rawNarration) : null;
 
     setStatus(`▶ Воспроизведение: ${placeName}`, 'active');
     setButtonState('active');
@@ -299,7 +320,7 @@ async function fetchNarration(lat, lon) {
     updateStats();
 
     // Wait for audio to finish before allowing next request
-    await playAudioBuffer(arrayBuffer);
+    await playAudioBuffer(arrayBuffer, fallbackText);
 
     if (state.walking) {
       setStatus('Идём... GPS активен', 'active');
