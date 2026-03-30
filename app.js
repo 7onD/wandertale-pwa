@@ -5,7 +5,7 @@
 
 const API_BASE = window.location.hostname === 'localhost'
   ? 'http://localhost:3000'
-  : 'https://YOUR_RAILWAY_URL';
+  : 'wandertale-backend-production.up.railway.app';
 
 const BACKEND_URL      = `${API_BASE}/narrate`;
 
