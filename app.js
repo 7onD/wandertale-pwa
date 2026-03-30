@@ -5,7 +5,7 @@
 
 const API_BASE = window.location.hostname === 'localhost'
   ? 'http://localhost:3000'
-  : 'wandertale-backend-production.up.railway.app';
+  : 'https://wandertale-backend-production.up.railway.app';
 
 const BACKEND_URL      = `${API_BASE}/narrate`;
 
@@ -20,7 +20,7 @@ function dbg(msg) {
   }
 }
 
-dbg('App started. API_BASE: ' + API_BASE);
+dbg('API_BASE: ' + API_BASE);
 const MIN_DISTANCE_M   = 80;   // metres before we fire a new request
 const MAX_SESSION_HIST = 20;   // deduplicate last N place names
 
