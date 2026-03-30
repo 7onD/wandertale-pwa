@@ -250,9 +250,11 @@ async function fetchNarration(lat, lon) {
   let response;
   try {
     response = await fetch(BACKEND_URL, {
-      method:  'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body:    JSON.stringify({ lat, lon }),
+      method:      'POST',
+      mode:        'cors',
+      credentials: 'omit',
+      headers:     { 'Content-Type': 'application/json' },
+      body:        JSON.stringify({ lat, lon }),
     });
   } catch (networkErr) {
     dbg('Fetch error: ' + networkErr.message);
