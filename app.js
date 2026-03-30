@@ -26,15 +26,15 @@ const MAX_SESSION_HIST = 20;   // deduplicate last N place names
 
 // ── State ─────────────────────────────────────────────────────────────────────
 const state = {
-  walking:       false,
-  loading:       false,
-  pollInterval:  null,    // iOS-safe GPS polling interval
+  walking:        false,
+  loading:        false,
+  pollInterval:   null,   // iOS-safe GPS polling interval
   lastRequestPos: null,   // { lat, lon } of the last successful API call
-  sessionPlaces: [],      // deduplication history (place names)
-  audioCtx:      null,
-  currentSource: null,    // active AudioBufferSourceNode
-  speechUtter:   null,    // active SpeechSynthesisUtterance
-  audioPlaying:  false,
+  sessionPlaces:  [],     // deduplication history (place names)
+  currentAudio:   null,   // active HTML Audio element
+  lastNarration:  '',     // encoded narration text for TTS fallback
+  speechUtter:    null,   // active SpeechSynthesisUtterance
+  audioPlaying:   false,
 };
 
 // ── DOM refs ──────────────────────────────────────────────────────────────────
@@ -172,75 +172,51 @@ function escHtml(str) {
 
 // ── Audio helpers ─────────────────────────────────────────────────────────────
 
-// Unlock AudioContext on iOS — must be called inside a user gesture handler
-async function unlockAudio() {
-  if (!state.audioCtx) {
-    state.audioCtx = new (window.AudioContext || window.webkitAudioContext)();
-  }
-  if (state.audioCtx.state === 'suspended') {
-    await state.audioCtx.resume();
-  }
-  // Play 0.1s of silence to fully unlock iOS audio
-  const buffer = state.audioCtx.createBuffer(1, 1, 22050);
-  const source = state.audioCtx.createBufferSource();
-  source.buffer = buffer;
-  source.connect(state.audioCtx.destination);
-  source.start(0);
-  dbg('Audio unlocked: ' + state.audioCtx.state);
-}
-
 function stopAllAudio() {
-  // Stop Web Audio API source
-  if (state.currentSource) {
-    try { state.currentSource.stop(); } catch (_) {}
-    state.currentSource = null;
+  if (state.currentAudio) {
+    state.currentAudio.pause();
+    state.currentAudio = null;
   }
-  // Stop SpeechSynthesis
   if (window.speechSynthesis) {
     window.speechSynthesis.cancel();
   }
-  state.speechUtter = null;
+  state.speechUtter  = null;
   state.audioPlaying = false;
 }
 
-async function playAudioBuffer(arrayBuffer, fallbackText) {
-  dbg('arrayBuffer size: ' + arrayBuffer.byteLength + ' bytes');
-  if (!state.audioCtx) {
-    dbg('ERROR: audioCtx is null');
-    return;
-  }
-  dbg('audioCtx state: ' + state.audioCtx.state);
-
-  // Resume context if iOS suspended it
-  if (state.audioCtx.state === 'suspended') {
-    await state.audioCtx.resume();
-    dbg('audioCtx resumed');
-  }
-
+async function playAudioBuffer(arrayBuffer) {
+  dbg('Playing audio via Blob URL, size: ' + arrayBuffer.byteLength);
   try {
-    // iOS requires a fresh copy of the buffer for decodeAudioData
-    const decoded = await state.audioCtx.decodeAudioData(arrayBuffer.slice(0));
-    dbg('Decoded ok, duration: ' + decoded.duration.toFixed(1) + 's, channels: ' + decoded.numberOfChannels);
-
-    if (state.currentSource) {
-      state.currentSource.stop();
-      state.currentSource.disconnect();
+    if (state.currentAudio) {
+      state.currentAudio.pause();
+      state.currentAudio = null;
     }
-    const source = state.audioCtx.createBufferSource();
-    source.buffer = decoded;
-    source.connect(state.audioCtx.destination);
-    source.onended = () => { state.audioPlaying = false; };
-    source.start(0);
-    state.currentSource = source;
+    const blob  = new Blob([arrayBuffer], { type: 'audio/mpeg' });
+    const url   = URL.createObjectURL(blob);
+    const audio = new Audio(url);
+    audio.volume = 1.0;
+    state.currentAudio = audio;
+    audio.onended = () => {
+      state.audioPlaying = false;
+      URL.revokeObjectURL(url);
+      dbg('Audio finished');
+    };
+    audio.onerror = (e) => {
+      dbg('Audio element error: ' + (e.message || 'unknown'));
+      state.audioPlaying = false;
+    };
+    await audio.play();
     state.audioPlaying = true;
+    dbg('Audio playing via HTML Audio element');
   } catch (err) {
-    dbg('decodeAudioData FAILED: ' + err.name + ' — trying speechSynthesis fallback');
+    dbg('Audio play failed: ' + err.name + ': ' + err.message + ' — fallback to speechSynthesis');
     state.audioPlaying = false;
-    if (fallbackText && window.speechSynthesis) {
-      const utter = new SpeechSynthesisUtterance(fallbackText);
-      utter.lang = 'ru-RU';
-      speechSynthesis.speak(utter);
-    }
+    const text  = state.lastNarration ? decodeURIComponent(state.lastNarration) : 'Информация о месте';
+    const utter = new SpeechSynthesisUtterance(text);
+    utter.lang  = 'ru-RU';
+    utter.onend = () => { state.audioPlaying = false; };
+    speechSynthesis.speak(utter);
+    state.audioPlaying = true;
   }
 }
 
@@ -293,9 +269,8 @@ async function fetchNarration(lat, lon) {
 
   // ── Audio/mpeg response — play via Web Audio API ─────────────────────────
   if (contentType.includes('audio/mpeg')) {
-    const placeName    = response.headers.get('x-place') || 'Место рядом';
-    const rawNarration = response.headers.get('x-narration');
-    const fallbackText = rawNarration ? decodeURIComponent(rawNarration) : null;
+    const placeName = response.headers.get('x-place') || 'Место рядом';
+    state.lastNarration = response.headers.get('x-narration') || '';
 
     setStatus(`▶ Воспроизведение: ${placeName}`, 'active');
     setButtonState('active');
@@ -320,7 +295,7 @@ async function fetchNarration(lat, lon) {
     updateStats();
 
     // Wait for audio to finish before allowing next request
-    await playAudioBuffer(arrayBuffer, fallbackText);
+    await playAudioBuffer(arrayBuffer);
 
     if (state.walking) {
       setStatus('Идём... GPS активен', 'active');
@@ -459,9 +434,6 @@ async function startWalk() {
     setStatus('Геолокация не поддерживается этим браузером.', 'error');
     return;
   }
-
-  // Unlock audio on iOS — must happen inside user tap handler
-  await unlockAudio();
 
   setStatus('Получение координат...', 'loading');
   setButtonState('loading');
