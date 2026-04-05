@@ -65,5 +65,14 @@
     <strong>DEBUG</strong><br>
     <div id="debug-log"></div>
   </div>
+  <script>
+    if ('serviceWorker' in navigator) {
+      window.addEventListener('load', () => {
+        navigator.serviceWorker.register('/wandertale-pwa/sw.js')
+          .then(reg => console.log('SW registered:', reg.scope))
+          .catch(err => console.log('SW error:', err));
+      });
+    }
+  </script>
 </body>
 </html>

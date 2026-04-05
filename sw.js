@@ -1,10 +1,10 @@
-const CACHE_NAME = 'wandertale-v3';
+const CACHE_NAME = 'wandertale-v4';
 
 const FILES_TO_CACHE = [
-  './',
-  './index.html',
-  './app.js',
-  './manifest.json'
+  '/wandertale-pwa/',
+  '/wandertale-pwa/index.html',
+  '/wandertale-pwa/app.js',
+  '/wandertale-pwa/manifest.json'
 ];
 
 self.addEventListener('install', event => {
