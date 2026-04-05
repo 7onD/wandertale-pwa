@@ -289,6 +289,16 @@ async function fetchNarration(lat, lon) {
   }
 
   dbg('Response status: ' + response.status + ' type: ' + response.headers.get('content-type'));
+
+  // 204 — no interesting places nearby, skip silently
+  if (response.status === 204) {
+    state.loading = false;
+    setButtonState('active');
+    dbg('No POI nearby — skipped');
+    if (state.walking) setStatus('Симуляция активна. Нажмите на карту.', 'active');
+    return;
+  }
+
   const contentType = response.headers.get('content-type') || '';
 
   if (contentType.includes('audio/mpeg')) {
