@@ -47,6 +47,30 @@ const cardInner = document.getElementById('cardInner');
 const sessionStats = document.getElementById('sessionStats');
 const statsText    = document.getElementById('statsText');
 
+// ── Map ───────────────────────────────────────────────────────────────────────
+const userIcon = L.divIcon({
+  className: '',
+  html: '<div style="width:14px;height:14px;background:#3b82f6;border:2px solid white;border-radius:50%;box-shadow:0 0 8px #3b82f6"></div>',
+  iconSize: [14, 14],
+  iconAnchor: [7, 7]
+});
+
+const placeIcon = L.divIcon({
+  className: '',
+  html: '<div style="width:12px;height:12px;background:#ef4444;border:2px solid white;border-radius:50%;box-shadow:0 0 6px #ef4444"></div>',
+  iconSize: [12, 12],
+  iconAnchor: [6, 6]
+});
+
+const map = L.map('map', { zoomControl: false, attributionControl: false });
+L.tileLayer('https://{s}.basemaps.cartocdn.com/dark_all/{z}/{x}/{y}{r}.png', {
+  maxZoom: 19
+}).addTo(map);
+map.setView([55.75, 37.61], 13);
+
+let userMarker  = null;
+let placeMarker = null;
+
 // ── Service worker — unregister all to avoid fetch interception ───────────────
 if ('serviceWorker' in navigator) {
   navigator.serviceWorker.getRegistrations().then(registrations => {
@@ -270,7 +294,7 @@ async function fetchNarration(lat, lon) {
 
   // ── Audio/mpeg response — play via Web Audio API ─────────────────────────
   if (contentType.includes('audio/mpeg')) {
-    const placeName = response.headers.get('x-place') || 'Место рядом';
+    const placeName = decodeURIComponent(response.headers.get('x-place') || 'Место рядом');
     state.lastNarration = response.headers.get('x-narration') || '';
 
     setStatus(`▶ Воспроизведение: ${placeName}`, 'active');
@@ -287,6 +311,12 @@ async function fetchNarration(lat, lon) {
 
     // Add to dedup history — use placeholder since we only have the name from header
     addToHistory(placeName);
+
+    // Update place marker on map
+    if (placeMarker) placeMarker.remove();
+    placeMarker = L.marker([lat, lon], { icon: placeIcon })
+      .addTo(map)
+      .bindTooltip(placeName, { permanent: false, direction: 'top' });
 
     // Show card immediately with audio playing badge
     showCard(placeName, '🎧 Аудио воспроизводится...', [], 'api');
@@ -341,6 +371,12 @@ async function fetchNarration(lat, lon) {
   state.loading = false;
   updateStats();
 
+  // Update place marker on map
+  if (placeMarker) placeMarker.remove();
+  placeMarker = L.marker([lat, lon], { icon: placeIcon })
+    .addTo(map)
+    .bindTooltip(placeName, { permanent: false, direction: 'top' });
+
   const audioMode = audioFailed ? 'tts' : 'none';
   showCard(placeName, narration, [], audioMode);
 
@@ -374,6 +410,14 @@ function isPlaceSeen(placeName) {
 function onPositionUpdate(pos) {
   const { latitude: lat, longitude: lon } = pos.coords;
   dbg('GPS ok: ' + lat.toFixed(4) + ',' + lon.toFixed(4));
+
+  // Update user marker and re-centre map
+  if (userMarker) {
+    userMarker.setLatLng([lat, lon]);
+  } else {
+    userMarker = L.marker([lat, lon], { icon: userIcon }).addTo(map);
+  }
+  map.setView([lat, lon], 16);
 
   // Don't fire if audio is still playing or another request is in flight
   if (state.loading || state.audioPlaying) return;

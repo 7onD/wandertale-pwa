@@ -12,6 +12,8 @@
   <title>WanderTale</title>
 
   <link rel="manifest" href="manifest.json" />
+  <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css"/>
+  <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
   <link rel="stylesheet" href="style.css" />
 </head>
 <body>
@@ -37,6 +39,8 @@
         <span class="btn-icon" id="btnIcon">▶</span>
         <span class="btn-label" id="btnLabel">Начать прогулку</span>
       </button>
+
+      <div id="map" style="height:220px; border-radius:16px; overflow:hidden; margin:16px 0;"></div>
 
       <div class="place-card" id="placeCard" aria-live="polite">
         <div class="card-inner" id="cardInner">
