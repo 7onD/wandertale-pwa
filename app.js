@@ -3,7 +3,9 @@
    Plain ES2020, no frameworks, no bundler.
 ═══════════════════════════════════════════════════════════════ */
 
-const API_BASE = '/api';
+const API_BASE = window.location.hostname === 'localhost'
+  ? 'http://localhost:3000'
+  : 'https://wandertale-backend-production.up.railway.app';
 
 const BACKEND_URL      = `${API_BASE}/narrate`;
 
