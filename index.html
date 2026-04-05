@@ -67,7 +67,10 @@
   <a href="debug.html" style="position:fixed;top:16px;right:16px;background:rgba(255,255,255,0.1);color:#666;font-size:11px;padding:6px 10px;border-radius:8px;text-decoration:none;">🛠 Debug</a>
 
   <div id="debug-panel" style="position:fixed;bottom:0;left:0;right:0;background:#1e1e1e;color:#00ff00;font-size:11px;font-family:monospace;padding:8px;max-height:180px;overflow-y:auto;z-index:9999;border-top:1px solid #333;">
-    <strong>DEBUG</strong><br>
+    <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:4px;">
+      <strong>DEBUG</strong>
+      <button onclick="document.getElementById('debug-log').innerHTML=''" style="background:none;border:1px solid #444;color:#666;font-size:10px;padding:2px 8px;border-radius:4px;cursor:pointer;">очистить</button>
+    </div>
     <div id="debug-log"></div>
   </div>
   <script>
