@@ -1,0 +1,477 @@
+/* ═══════════════════════════════════════════════════════════════
+   WanderTale — debug.js
+   Debug mode: fake GPS via map click, no real geolocation.
+═══════════════════════════════════════════════════════════════ */
+
+const API_BASE = window.location.hostname === 'localhost'
+  ? 'http://localhost:3000'
+  : 'https://wandertale-backend-production.up.railway.app';
+
+const BACKEND_URL = `${API_BASE}/narrate`;
+
+// ── Debug logger ──────────────────────────────────────────────────────────────
+function dbg(msg) {
+  console.log(msg);
+  const el = document.getElementById('debug-log');
+  if (el) {
+    const line = document.createElement('div');
+    line.textContent = new Date().toLocaleTimeString() + ' — ' + msg;
+    el.prepend(line);
+  }
+}
+
+dbg('Debug mode. API_BASE: ' + API_BASE);
+const MIN_DISTANCE_M   = 80;
+const MAX_SESSION_HIST = 20;
+
+// ── Fake GPS state ────────────────────────────────────────────────────────────
+let fakePos = { lat: 59.9386, lon: 30.3141 }; // Saint Petersburg centre
+
+// ── State ─────────────────────────────────────────────────────────────────────
+const state = {
+  walking:        false,
+  loading:        false,
+  pollInterval:   null,
+  lastRequestPos: null,
+  sessionPlaces:  [],
+  currentAudio:   null,
+  lastNarration:  '',
+  speechUtter:    null,
+  audioPlaying:   false,
+};
+
+// ── DOM refs ──────────────────────────────────────────────────────────────────
+const mainBtn      = document.getElementById('mainBtn');
+const btnIcon      = document.getElementById('btnIcon');
+const btnLabel     = document.getElementById('btnLabel');
+const statusDot    = document.getElementById('statusDot');
+const statusTxt    = document.getElementById('statusText');
+const cardInner    = document.getElementById('cardInner');
+const sessionStats = document.getElementById('sessionStats');
+const statsText    = document.getElementById('statsText');
+
+// ── Map ───────────────────────────────────────────────────────────────────────
+const userIcon = L.divIcon({
+  className: '',
+  html: '<div style="width:14px;height:14px;background:#3b82f6;border:2px solid white;border-radius:50%;box-shadow:0 0 8px #3b82f6"></div>',
+  iconSize: [14, 14],
+  iconAnchor: [7, 7],
+});
+
+const placeIcon = L.divIcon({
+  className: '',
+  html: '<div style="width:12px;height:12px;background:#ef4444;border:2px solid white;border-radius:50%;box-shadow:0 0 6px #ef4444"></div>',
+  iconSize: [12, 12],
+  iconAnchor: [6, 6],
+});
+
+const map = L.map('map', { zoomControl: true, attributionControl: false });
+L.tileLayer('https://{s}.basemaps.cartocdn.com/dark_all/{z}/{x}/{y}{r}.png', {
+  maxZoom: 19,
+}).addTo(map);
+map.setView([fakePos.lat, fakePos.lon], 14);
+
+let userMarker  = null;
+let placeMarker = null;
+
+// Place initial user marker at default fakePos
+userMarker = L.marker([fakePos.lat, fakePos.lon], { icon: userIcon })
+  .addTo(map)
+  .bindTooltip('Фейковая позиция', { permanent: false, direction: 'top' });
+
+// ── Map click → set fake GPS ──────────────────────────────────────────────────
+map.on('click', (e) => {
+  const { lat, lng } = e.latlng;
+  fakePos = { lat, lon: lng };
+  dbg('📍 Fake GPS set: ' + lat.toFixed(4) + ', ' + lng.toFixed(4));
+
+  if (userMarker) {
+    userMarker.setLatLng([lat, lng]);
+  } else {
+    userMarker = L.marker([lat, lng], { icon: userIcon }).addTo(map);
+  }
+  map.setView([lat, lng], map.getZoom());
+
+  if (state.walking && !state.loading && !state.audioPlaying) {
+    onPositionUpdate(lat, lng);
+  }
+});
+
+// ── Haversine formula (returns metres) ───────────────────────────────────────
+function haversine(lat1, lon1, lat2, lon2) {
+  const R   = 6371000;
+  const rad = Math.PI / 180;
+  const dLat = (lat2 - lat1) * rad;
+  const dLon = (lon2 - lon1) * rad;
+  const a =
+    Math.sin(dLat / 2) ** 2 +
+    Math.cos(lat1 * rad) * Math.cos(lat2 * rad) *
+    Math.sin(dLon / 2) ** 2;
+  return R * 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
+}
+
+// ── UI helpers ────────────────────────────────────────────────────────────────
+function setStatus(text, mode = 'idle') {
+  statusTxt.textContent = text;
+  statusDot.className   = 'status-dot';
+  if (mode !== 'idle') statusDot.classList.add(mode);
+}
+
+function setButtonState(mode) {
+  mainBtn.disabled  = false;
+  mainBtn.className = 'btn-main';
+  if (mode === 'idle') {
+    btnIcon.textContent  = '▶';
+    btnLabel.textContent = 'Начать прогулку';
+  } else if (mode === 'active') {
+    mainBtn.classList.add('is-active');
+    btnIcon.textContent  = '■';
+    btnLabel.textContent = 'Остановить';
+  } else if (mode === 'loading') {
+    mainBtn.classList.add('is-loading');
+    mainBtn.disabled     = true;
+    btnIcon.textContent  = '…';
+    btnLabel.textContent = 'Загрузка...';
+  }
+}
+
+function showCard(placeName, narration, types, audioMode) {
+  const typeLabel = formatType(types);
+  const badgeHTML = audioMode === 'api'
+    ? `<div class="card-audio-badge">🔊 Аудио</div>`
+    : audioMode === 'tts'
+    ? `<div class="card-audio-badge is-tts">🔈 Синтез речи</div>`
+    : '';
+  cardInner.innerHTML = `
+    <div class="card-place-name">${escHtml(placeName)}</div>
+    ${typeLabel ? `<span class="card-place-type">${escHtml(typeLabel)}</span>` : ''}
+    <p class="card-narration">${escHtml(narration)}</p>
+    ${badgeHTML}
+  `;
+  cardInner.classList.remove('animate');
+  void cardInner.offsetWidth;
+  cardInner.classList.add('animate');
+}
+
+function showPlaceholder() {
+  cardInner.innerHTML = `
+    <div class="card-placeholder">
+      <span class="card-placeholder-icon">📍</span>
+      <p>Нажмите на карту для симуляции GPS-координат</p>
+    </div>
+  `;
+}
+
+function updateStats() {
+  const count = state.sessionPlaces.length;
+  if (count === 0) { sessionStats.hidden = true; return; }
+  sessionStats.hidden   = false;
+  statsText.textContent = `Мест за сессию: ${count}`;
+}
+
+function formatType(types) {
+  if (!types || types.length === 0) return '';
+  const labels = {
+    museum:             'Музей',
+    restaurant:         'Ресторан',
+    cafe:               'Кафе',
+    park:               'Парк',
+    church:             'Церковь',
+    bar:                'Бар',
+    store:              'Магазин',
+    tourist_attraction: 'Достопримечательность',
+    point_of_interest:  'Интересное место',
+    establishment:      'Заведение',
+    locality:           'Местность',
+    sublocality:        'Район',
+    transit_station:    'Транспортный узел',
+    subway_station:     'Метро',
+    train_station:      'Вокзал',
+  };
+  for (const t of types) {
+    if (labels[t]) return labels[t];
+  }
+  return types[0].replace(/_/g, ' ');
+}
+
+function escHtml(str) {
+  return String(str)
+    .replace(/&/g, '&amp;')
+    .replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;')
+    .replace(/"/g, '&quot;');
+}
+
+// ── Audio helpers ─────────────────────────────────────────────────────────────
+function stopAllAudio() {
+  if (state.currentAudio) {
+    state.currentAudio.pause();
+    state.currentAudio = null;
+  }
+  if (window.speechSynthesis) window.speechSynthesis.cancel();
+  state.speechUtter  = null;
+  state.audioPlaying = false;
+}
+
+async function playAudioBuffer(arrayBuffer) {
+  dbg('Playing audio via Blob URL, size: ' + arrayBuffer.byteLength);
+  try {
+    if (state.currentAudio) {
+      state.currentAudio.pause();
+      state.currentAudio = null;
+    }
+    const blob  = new Blob([arrayBuffer], { type: 'audio/mpeg' });
+    const url   = URL.createObjectURL(blob);
+    const audio = new Audio(url);
+    audio.volume = 1.0;
+    state.currentAudio = audio;
+    audio.onended = () => {
+      state.audioPlaying = false;
+      URL.revokeObjectURL(url);
+      dbg('Audio finished');
+    };
+    audio.onerror = (e) => {
+      dbg('Audio element error: ' + (e.message || 'unknown'));
+      state.audioPlaying = false;
+    };
+    await audio.play();
+    state.audioPlaying = true;
+    dbg('Audio playing via HTML Audio element');
+  } catch (err) {
+    dbg('Audio play failed: ' + err.name + ': ' + err.message + ' — fallback to speechSynthesis');
+    state.audioPlaying = false;
+    const text  = state.lastNarration ? decodeURIComponent(state.lastNarration) : 'Информация о месте';
+    const utter = new SpeechSynthesisUtterance(text);
+    utter.lang  = 'ru-RU';
+    utter.onend = () => { state.audioPlaying = false; };
+    speechSynthesis.speak(utter);
+    state.audioPlaying = true;
+  }
+}
+
+function speakText(text) {
+  return new Promise((resolve) => {
+    if (!window.speechSynthesis) { resolve(); return; }
+    const utter   = new SpeechSynthesisUtterance(text);
+    utter.lang    = 'ru-RU';
+    utter.rate    = 0.95;
+    utter.pitch   = 1.0;
+    utter.onend   = () => { state.audioPlaying = false; resolve(); };
+    utter.onerror = () => { state.audioPlaying = false; resolve(); };
+    state.speechUtter  = utter;
+    state.audioPlaying = true;
+    window.speechSynthesis.speak(utter);
+  });
+}
+
+// ── Core: fetch narration ─────────────────────────────────────────────────────
+async function fetchNarration(lat, lon) {
+  state.loading = true;
+  setButtonState('loading');
+  setStatus('Запрос к серверу...', 'loading');
+
+  dbg('Fetching: ' + BACKEND_URL + ' lat=' + lat.toFixed(4) + ' lon=' + lon.toFixed(4));
+  let response;
+  try {
+    response = await fetch(BACKEND_URL, {
+      method:      'POST',
+      mode:        'cors',
+      credentials: 'omit',
+      headers:     { 'Content-Type': 'application/json' },
+      body:        JSON.stringify({ lat, lon }),
+    });
+  } catch (networkErr) {
+    dbg('Fetch error: ' + networkErr.message);
+    state.loading = false;
+    setButtonState('active');
+    setStatus('Нет связи с сервером.', 'error');
+    return;
+  }
+
+  dbg('Response status: ' + response.status + ' type: ' + response.headers.get('content-type'));
+  const contentType = response.headers.get('content-type') || '';
+
+  if (contentType.includes('audio/mpeg')) {
+    const placeName = decodeURIComponent(response.headers.get('x-place') || 'Место рядом');
+    state.lastNarration = response.headers.get('x-narration') || '';
+
+    setStatus(`▶ Воспроизведение: ${placeName}`, 'active');
+    setButtonState('active');
+
+    let arrayBuffer;
+    try {
+      arrayBuffer = await response.arrayBuffer();
+    } catch (e) {
+      state.loading = false;
+      setStatus('Ошибка получения аудио', 'error');
+      return;
+    }
+
+    addToHistory(placeName);
+
+    if (placeMarker) placeMarker.remove();
+    placeMarker = L.marker([lat, lon], { icon: placeIcon })
+      .addTo(map)
+      .bindTooltip(placeName, { permanent: false, direction: 'top' });
+
+    showCard(placeName, '🎧 Аудио воспроизводится...', [], 'api');
+    state.loading = false;
+    state.lastRequestPos = { lat, lon };
+    updateStats();
+
+    await playAudioBuffer(arrayBuffer);
+    if (state.walking) setStatus('Симуляция активна. Нажмите на карту.', 'active');
+    return;
+  }
+
+  let data;
+  try {
+    data = await response.json();
+  } catch (e) {
+    state.loading = false;
+    setButtonState('active');
+    setStatus('Неожиданный ответ от сервера', 'error');
+    return;
+  }
+
+  if (data.error === true) {
+    state.loading = false;
+    setButtonState('active');
+    setStatus(`Ошибка сервиса: ${data.failed_service} — ${data.message}`, 'error');
+    return;
+  }
+
+  const placeName   = data.place     || 'Место рядом';
+  const narration   = data.narration || '';
+  const audioFailed = data.audio === false;
+
+  if (isPlaceSeen(placeName)) {
+    dbg('Skipped (already seen): ' + placeName);
+    state.loading = false;
+    setButtonState('active');
+    if (state.walking) setStatus('Симуляция активна. Нажмите на карту.', 'active');
+    return;
+  }
+
+  addToHistory(placeName);
+  state.lastRequestPos = { lat, lon };
+  state.loading = false;
+  updateStats();
+
+  if (placeMarker) placeMarker.remove();
+  placeMarker = L.marker([lat, lon], { icon: placeIcon })
+    .addTo(map)
+    .bindTooltip(placeName, { permanent: false, direction: 'top' });
+
+  const audioMode = audioFailed ? 'tts' : 'none';
+  showCard(placeName, narration, [], audioMode);
+
+  if (audioFailed) {
+    setStatus(`▶ Синтез речи: ${placeName}`, 'active');
+    setButtonState('active');
+    await speakText(narration);
+  } else {
+    setStatus(`📍 ${placeName}`, 'active');
+    setButtonState('active');
+  }
+
+  if (state.walking) setStatus('Симуляция активна. Нажмите на карту.', 'active');
+}
+
+// ── Deduplication ─────────────────────────────────────────────────────────────
+function addToHistory(placeName) {
+  state.sessionPlaces.push(placeName);
+  if (state.sessionPlaces.length > MAX_SESSION_HIST) state.sessionPlaces.shift();
+}
+
+function isPlaceSeen(placeName) {
+  return state.sessionPlaces.includes(placeName);
+}
+
+// ── Fake GPS position handler ─────────────────────────────────────────────────
+function onPositionUpdate(lat, lon) {
+  dbg('Fake GPS: ' + lat.toFixed(4) + ',' + lon.toFixed(4));
+
+  if (state.loading || state.audioPlaying) return;
+
+  if (state.lastRequestPos) {
+    const dist = haversine(state.lastRequestPos.lat, state.lastRequestPos.lon, lat, lon);
+    dbg('Distance from last: ' + dist.toFixed(0) + 'm (min 80m)');
+    if (dist < MIN_DISTANCE_M) return;
+  }
+
+  fetchNarration(lat, lon);
+}
+
+// ── Fake GPS polling loop ─────────────────────────────────────────────────────
+function startGPSPolling() {
+  // Fire immediately with current fakePos
+  onPositionUpdate(fakePos.lat, fakePos.lon);
+  // Then poll every 15s using whatever fakePos is at that time
+  state.pollInterval = setInterval(() => {
+    onPositionUpdate(fakePos.lat, fakePos.lon);
+  }, 15000);
+}
+
+function stopGPSPolling() {
+  if (state.pollInterval) {
+    clearInterval(state.pollInterval);
+    state.pollInterval = null;
+  }
+}
+
+// ── Toggle walk (main button) ─────────────────────────────────────────────────
+function toggleWalk() {
+  if (state.walking) {
+    stopWalk();
+  } else {
+    startWalk();
+  }
+}
+
+async function unlockAudio() {
+  try {
+    const AudioCtx = window.AudioContext || window.webkitAudioContext;
+    if (!AudioCtx) return;
+    const ctx = new AudioCtx();
+    const buf = ctx.createBuffer(1, 1, 22050);
+    const src = ctx.createBufferSource();
+    src.buffer = buf;
+    src.connect(ctx.destination);
+    src.start(0);
+    await ctx.close();
+    dbg('Audio unlocked');
+  } catch (e) {
+    dbg('Audio unlock error: ' + e.message);
+  }
+}
+
+async function startWalk() {
+  await unlockAudio();
+
+  setStatus('Симуляция активна. Нажмите на карту.', 'loading');
+  setButtonState('loading');
+  dbg('Starting fake GPS polling at ' + fakePos.lat.toFixed(4) + ',' + fakePos.lon.toFixed(4));
+
+  state.walking = true;
+  setButtonState('active');
+  setStatus('Симуляция активна. Нажмите на карту.', 'active');
+
+  startGPSPolling();
+}
+
+function stopWalk() {
+  stopGPSPolling();
+  stopAllAudio();
+
+  state.walking        = false;
+  state.loading        = false;
+  state.lastRequestPos = null;
+  state.sessionPlaces  = [];
+
+  setButtonState('idle');
+  setStatus('Симуляция остановлена', 'idle');
+  showPlaceholder();
+
+  sessionStats.hidden = true;
+}
