@@ -20,7 +20,7 @@ function dbg(msg) {
   }
 }
 
-dbg('API_BASE: ' + API_BASE);
+dbg('WanderTale started. API: ' + API_BASE);
 const MIN_DISTANCE_M   = 80;   // metres before we fire a new request
 const MAX_SESSION_HIST = 20;   // deduplicate last N place names
 
@@ -75,7 +75,6 @@ let placeMarker = null;
 if ('serviceWorker' in navigator) {
   navigator.serviceWorker.getRegistrations().then(registrations => {
     registrations.forEach(reg => reg.unregister());
-    dbg('SW unregistered: ' + registrations.length + ' workers removed');
   });
 }
 
@@ -208,7 +207,6 @@ function stopAllAudio() {
 }
 
 async function playAudioBuffer(arrayBuffer) {
-  dbg('Playing audio via Blob URL, size: ' + arrayBuffer.byteLength);
   try {
     if (state.currentAudio) {
       state.currentAudio.pause();
@@ -230,7 +228,6 @@ async function playAudioBuffer(arrayBuffer) {
     };
     await audio.play();
     state.audioPlaying = true;
-    dbg('Audio playing via HTML Audio element');
   } catch (err) {
     dbg('Audio play failed: ' + err.name + ': ' + err.message + ' — fallback to speechSynthesis');
     state.audioPlaying = false;
@@ -270,7 +267,7 @@ async function fetchNarration(lat, lon) {
   setButtonState('loading');
   setStatus('Запрос к серверу...', 'loading');
 
-  dbg('Fetching: ' + API_BASE + '/narrate');
+  dbg('→ Запрос к серверу...');
   let response;
   try {
     response = await fetch(BACKEND_URL, {
@@ -288,7 +285,7 @@ async function fetchNarration(lat, lon) {
     return;
   }
 
-  dbg('Response status: ' + response.status + ' type: ' + response.headers.get('content-type'));
+  dbg('← Ответ: ' + response.status + ' ' + (response.headers.get('content-type') || ''));
 
   // 204 — no interesting places nearby, skip silently
   if (response.status === 204) {
@@ -303,7 +300,13 @@ async function fetchNarration(lat, lon) {
   // ── Audio/mpeg response — play via Web Audio API ─────────────────────────
   if (contentType.includes('audio/mpeg')) {
     const placeName = decodeURIComponent(response.headers.get('x-place') || 'Место рядом');
+    const placeAddr = decodeURIComponent(response.headers.get('x-address') || '—');
+    const placeType = decodeURIComponent(response.headers.get('x-type') || '—');
     state.lastNarration = response.headers.get('x-narration') || '';
+
+    dbg('📍 Место: ' + placeName);
+    dbg('🏠 Адрес: ' + placeAddr);
+    dbg('🏷 Тип: ' + placeType);
 
     setStatus(`▶ Воспроизведение: ${placeName}`, 'active');
     setButtonState('active');
@@ -417,7 +420,6 @@ function isPlaceSeen(placeName) {
 // ── GPS position handler ──────────────────────────────────────────────────────
 function onPositionUpdate(pos) {
   const { latitude: lat, longitude: lon } = pos.coords;
-  dbg('GPS ok: ' + lat.toFixed(4) + ',' + lon.toFixed(4));
 
   // Update user marker and re-centre map
   if (userMarker) {
@@ -438,7 +440,6 @@ function onPositionUpdate(pos) {
       lat,
       lon
     );
-    dbg('Distance from last: ' + dist.toFixed(0) + 'm (min 80m)');
     if (dist < MIN_DISTANCE_M) return;
   }
 
@@ -493,9 +494,8 @@ async function unlockAudio() {
     src.connect(ctx.destination);
     src.start(0);
     await ctx.close();
-    dbg('Audio unlocked');
   } catch (e) {
-    dbg('Audio unlock error: ' + e.message);
+    dbg('ОШИБКА разблокировки аудио: ' + e.message);
   }
 }
 
@@ -509,7 +509,7 @@ async function startWalk() {
 
   setStatus('Получение координат...', 'loading');
   setButtonState('loading');
-  dbg('Starting GPS polling...');
+  dbg('GPS: старт опроса каждые 15с');
 
   state.walking = true;
   setButtonState('active');
