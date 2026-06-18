@@ -688,9 +688,9 @@ function BookmarkSheet({ onClose, onSave }) {
   const [emo,  setEmo]  = useState('★');
   return (
     <>
-      <div onClick={onClose} style={{ position:'absolute', inset:0, background:'rgba(10,8,6,.5)', zIndex:90 }}/>
+      <div onClick={onClose} style={{ position:'fixed', inset:0, background:'rgba(10,8,6,.5)', zIndex:90 }}/>
       <div style={{
-        position:'absolute', bottom:0, left:0, right:0, zIndex:91,
+        position:'fixed', bottom:0, left:0, right:0, zIndex:91,
         background:'var(--paper)', borderRadius:'22px 22px 0 0',
         padding:'10px 20px 28px', animation:'slideUp .25s ease',
       }}>
