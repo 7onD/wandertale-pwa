@@ -267,12 +267,13 @@ function fmtTime() {
 }
 
 /* ── HomeScreen ────────────────────────────────────────────── */
-function HomeScreen({ walking, audioPlaying, loading, currentPlace, sessionPlaces, bookmarkCount, sessionStart, userPos, onToggle, onOpenStory, debugMode, onFakeGPS, geoError }) {
+function HomeScreen({ walking, audioPlaying, loading, currentPlace, sessionPlaces, bookmarkCount, sessionStart, userPos, onToggle, onPauseAudio, onOpenStory, debugMode, onFakeGPS, geoError, messages, onBookmark, bookmarks }) {
   const mapRef       = useRef(null);
   const mapInst      = useRef(null);
   const userMark     = useRef(null);
   const placeMark    = useRef(null);
-  const [clock, setClock] = useState(fmtTime());
+  const [clock,    setClock]    = useState(fmtTime());
+  const [pinSheet, setPinSheet] = useState(false);
 
   // Clock tick
   useEffect(() => {
@@ -390,7 +391,7 @@ function HomeScreen({ walking, audioPlaying, loading, currentPlace, sessionPlace
             : '○ Нажмите ▶ чтобы начать'}
         </div>
         <div className="row" style={{ gap:16, alignItems:'center' }}>
-          <button onClick={onToggle} disabled={loading} style={{
+          <button onClick={audioPlaying ? onPauseAudio : onToggle} disabled={loading} style={{
             width:66, height:66, borderRadius:'50%', border:0,
             background: isActive ? 'var(--ink)' : 'var(--accent)',
             color: isActive ? 'var(--paper)' : 'var(--accent-ink)',
@@ -447,34 +448,68 @@ function HomeScreen({ walking, audioPlaying, loading, currentPlace, sessionPlace
 
       {/* current place card */}
       {currentPlace ? (
-        <button onClick={onOpenStory} style={{
-          textAlign:'left', width:'100%',
-          background:'var(--ink)', color:'var(--paper)',
-          border:0, borderRadius:20, padding:'16px 18px',
-          cursor:'pointer', display:'flex', gap:14, alignItems:'center',
-          fontFamily:'var(--sans)', marginBottom:16,
-        }}>
-          <div style={{
-            width:44, height:44, borderRadius:'50%',
-            border:'1px solid color-mix(in oklab, var(--paper) 35%, transparent)',
-            display:'flex', alignItems:'center', justifyContent:'center',
-            flexShrink:0, color:'var(--paper)',
+        <div style={{ marginBottom:16, position:'relative' }}>
+          <button onClick={onOpenStory} style={{
+            textAlign:'left', width:'100%',
+            background:'var(--ink)', color:'var(--paper)',
+            border:0, borderRadius:20, padding:'16px 18px',
+            cursor:'pointer', display:'flex', gap:14, alignItems:'center',
+            fontFamily:'var(--sans)',
           }}>
-            <I.Quill style={{ width:20, height:20 }}/>
-          </div>
-          <div className="col grow" style={{ minWidth:0 }}>
-            <div className="mono-xs" style={{ color:'color-mix(in oklab, var(--paper) 55%, transparent)', marginBottom:2 }}>
-              О чём речь сейчас
+            <div style={{
+              width:44, height:44, borderRadius:'50%',
+              border:'1px solid color-mix(in oklab, var(--paper) 35%, transparent)',
+              display:'flex', alignItems:'center', justifyContent:'center',
+              flexShrink:0, color:'var(--paper)',
+            }}>
+              <I.Quill style={{ width:20, height:20 }}/>
             </div>
-            <div className="serif" style={{ fontSize:17, letterSpacing:'-0.01em', lineHeight:1.25 }}>
-              {currentPlace.name}
+            <div className="col grow" style={{ minWidth:0 }}>
+              <div className="mono-xs" style={{ color:'color-mix(in oklab, var(--paper) 55%, transparent)', marginBottom:2 }}>
+                О чём речь сейчас
+              </div>
+              <div className="serif" style={{ fontSize:17, letterSpacing:'-0.01em', lineHeight:1.25 }}>
+                {currentPlace.name}
+              </div>
+              {currentPlace.address && <div style={{ fontSize:12, color:'color-mix(in oklab, var(--paper) 60%, transparent)', marginTop:2, whiteSpace:'nowrap', overflow:'hidden', textOverflow:'ellipsis' }}>
+                {currentPlace.address}
+              </div>}
             </div>
-            {currentPlace.address && <div style={{ fontSize:12, color:'color-mix(in oklab, var(--paper) 60%, transparent)', marginTop:2, whiteSpace:'nowrap', overflow:'hidden', textOverflow:'ellipsis' }}>
-              {currentPlace.address}
-            </div>}
-          </div>
-          <I.Back style={{ width:18, height:18, transform:'rotate(180deg)', opacity:.5, flexShrink:0 }}/>
-        </button>
+            <I.Back style={{ width:18, height:18, transform:'rotate(180deg)', opacity:.5, flexShrink:0 }}/>
+          </button>
+          {/* кнопка метки поверх карточки */}
+          {(() => {
+            const lastBubble = messages && [...messages].reverse().find(m => m.type === 'bubble');
+            const alreadyPinned = lastBubble && bookmarks && bookmarks.some(b => b.id === lastBubble.id);
+            return (
+              <button onClick={() => setPinSheet(true)} style={{
+                position:'absolute', top:10, right:10,
+                width:36, height:36, borderRadius:'50%',
+                background: alreadyPinned ? 'var(--stamp)' : 'color-mix(in oklab, var(--paper) 18%, transparent)',
+                border: alreadyPinned ? '0' : '1px solid color-mix(in oklab, var(--paper) 30%, transparent)',
+                color:'var(--paper)', cursor:'pointer',
+                display:'flex', alignItems:'center', justifyContent:'center',
+                transition:'all .2s',
+              }}>
+                <I.Pin style={{ width:16, height:16 }}/>
+              </button>
+            );
+          })()}
+          {pinSheet && (() => {
+            const lastBubble = messages && [...messages].reverse().find(m => m.type === 'bubble');
+            return (
+              <BookmarkSheet
+                onClose={() => setPinSheet(false)}
+                onSave={(note, emo) => {
+                  if (lastBubble) {
+                    onBookmark({ id: lastBubble.id, note, emo, time: lastBubble.time || '', place: currentPlace.name });
+                  }
+                  setPinSheet(false);
+                }}
+              />
+            );
+          })()}
+        </div>
       ) : (
         <div style={{
           textAlign:'center', padding:'26px 16px',
@@ -694,7 +729,7 @@ function BookmarkSheet({ onClose, onSave }) {
 }
 
 /* ── JournalScreen ─────────────────────────────────────────── */
-function JournalScreen({ bookmarks }) {
+function JournalScreen({ bookmarks, onRemove }) {
   return (
     <div className="screen-content" style={{ padding:'14px 20px 20px' }}>
       {/* header */}
@@ -723,7 +758,7 @@ function JournalScreen({ bookmarks }) {
             <div key={bm.id + i} style={{
               background:'var(--surface)', border:'.5px solid var(--rule)',
               borderRadius:16, padding:'12px 14px',
-              display:'flex', gap:12,
+              display:'flex', gap:12, position:'relative',
             }}>
               <div style={{
                 width:36, height:36, borderRadius:'50%',
@@ -731,7 +766,7 @@ function JournalScreen({ bookmarks }) {
                 display:'flex', alignItems:'center', justifyContent:'center',
                 fontSize:16, color:'var(--stamp)', flexShrink:0,
               }}>{bm.emo || '★'}</div>
-              <div className="col grow" style={{ minWidth:0 }}>
+              <div className="col grow" style={{ minWidth:0, paddingRight:28 }}>
                 <div className="row" style={{ gap:8, alignItems:'center', marginBottom:4 }}>
                   <div style={{ fontSize:13, fontWeight:500, whiteSpace:'nowrap', overflow:'hidden', textOverflow:'ellipsis' }}>
                     {bm.place || 'Место'}
@@ -750,6 +785,14 @@ function JournalScreen({ bookmarks }) {
                   </div>
                 )}
               </div>
+              <button onClick={() => onRemove(bm.id)} style={{
+                position:'absolute', top:10, right:10,
+                width:26, height:26, borderRadius:'50%',
+                background:'transparent', border:'.5px solid var(--rule)',
+                color:'var(--ink-3)', cursor:'pointer',
+                display:'flex', alignItems:'center', justifyContent:'center',
+                fontSize:14, lineHeight:1, padding:0,
+              }}>×</button>
             </div>
           ))}
         </div>
@@ -1109,9 +1152,18 @@ function App() {
   }, [fetchNarration]);
 
   const startGPS = useCallback(() => {
+    const onErr = (err) => {
+      dbg('GPS: '+err.message+' (code '+err.code+')');
+      if (err.code === 1) { // PERMISSION_DENIED
+        const msg = 'Доступ к геолокации запрещён. Откройте Настройки → Safari → Геолокация и разрешите для этого сайта.';
+        setGeoError(msg);
+        clearInterval(pollRef.current); pollRef.current = null;
+        walkingRef.current = false; loadingRef.current = false;
+        setWalking(false); setLoading(false);
+      }
+    };
     const poll = () => navigator.geolocation.getCurrentPosition(
-      onPosition,
-      err => dbg('GPS: '+err.message+' ('+err.code+')'),
+      onPosition, onErr,
       { enableHighAccuracy:false, timeout:10000, maximumAge:20000 }
     );
     poll();
@@ -1138,17 +1190,6 @@ function App() {
         return;
       }
       setGeoError(null);
-      /* check / request permission before starting */
-      if (navigator.permissions) {
-        const perm = await navigator.permissions.query({ name: 'geolocation' });
-        if (perm.state === 'denied') {
-          const msg = 'Доступ к геолокации запрещён. Разрешите в настройках браузера: Safari → Настройки → Сайты → Геолокация';
-          setGeoError(msg);
-          dbg('❌ ' + msg);
-          return;
-        }
-        /* 'prompt' — getCurrentPosition вызовет диалог сам */
-      }
       await unlockAudio();
       walkingRef.current=true;
       setWalking(true); setSessionStart(Date.now());
@@ -1172,6 +1213,10 @@ function App() {
     });
   }, []);
 
+  const removeBookmark = useCallback((id) => {
+    setBookmarks(prev => prev.filter(b => b.id !== id));
+  }, []);
+
   return (
     <div className="app-root">
       <div className="screen-area">
@@ -1180,9 +1225,10 @@ function App() {
             walking={walking} audioPlaying={audioPlaying} loading={loading}
             currentPlace={currentPlace} sessionPlaces={sessionPlaces}
             bookmarkCount={bookmarks.length} sessionStart={sessionStart}
-            userPos={userPos} onToggle={toggleWalk}
+            userPos={userPos} onToggle={toggleWalk} onPauseAudio={stopAudio}
             onOpenStory={() => setTab('story')}
             debugMode={debugMode} onFakeGPS={onFakeGPS} geoError={geoError}
+            messages={messages} onBookmark={addBookmark} bookmarks={bookmarks}
           />
         )}
         {tab === 'story' && (
@@ -1192,7 +1238,7 @@ function App() {
           />
         )}
         {tab === 'journal' && (
-          <JournalScreen bookmarks={bookmarks}/>
+          <JournalScreen bookmarks={bookmarks} onRemove={removeBookmark}/>
         )}
         {tab === 'profile' && (
           <ProfileScreen dark={dark} setDark={setDark}/>
