@@ -2,85 +2,1141 @@
 <html lang="ru">
 <head>
   <meta charset="UTF-8" />
-  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover" />
   <meta name="apple-mobile-web-app-capable" content="yes" />
   <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent" />
   <meta name="apple-mobile-web-app-title" content="WanderTale" />
-  <meta name="theme-color" content="#2E75B6" />
   <meta http-equiv="Content-Security-Policy" content="default-src * 'self' 'unsafe-inline' 'unsafe-eval' data: blob:; connect-src *;">
-
   <title>WanderTale</title>
-
   <link rel="manifest" href="manifest.json" />
-  <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css"/>
-  <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
-  <link rel="stylesheet" href="style.css" />
+
+  <!-- Fonts -->
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+  <link href="https://fonts.googleapis.com/css2?family=Fraunces:opsz,wght@9..144,300;9..144,400;9..144,500;9..144,700&family=Inter+Tight:wght@400;500;600&family=IBM+Plex+Mono:wght@400;500&display=swap" rel="stylesheet" />
+
+  <!-- Leaflet -->
+  <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" crossorigin="" />
+  <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js" crossorigin=""></script>
+
+  <style>
+/* ── Design tokens ───────────────────────────────────────── */
+:root {
+  --paper:#f1ebdd; --paper-2:#e8e0ce; --paper-3:#ddd3bd;
+  --ink:#1a1613; --ink-2:#3d362f; --ink-3:#6b6153; --ink-4:#9b9080;
+  --rule:#c9bfa8;
+  --accent:oklch(0.62 0.13 55);
+  --accent-2:oklch(0.55 0.08 145);
+  --accent-ink:#3a2412;
+  --stamp:oklch(0.48 0.16 25);
+  --bg-app:var(--paper);
+  --surface:#faf5e8; --surface-2:#f5eedb;
+  --overlay:rgba(26,22,19,0.06);
+  --serif:'Fraunces','Georgia',serif;
+  --sans:'Inter Tight',-apple-system,system-ui,sans-serif;
+  --mono:'IBM Plex Mono','SF Mono',ui-monospace,monospace;
+}
+:root.dark {
+  --paper:#15120e; --paper-2:#1f1a14; --paper-3:#2a2319;
+  --ink:#f1ebdd; --ink-2:#d9cfb8; --ink-3:#a89c84; --ink-4:#6b6153;
+  --rule:#3a3126;
+  --accent:oklch(0.72 0.14 65);
+  --accent-2:oklch(0.68 0.08 145);
+  --accent-ink:#f4e8cf;
+  --stamp:oklch(0.62 0.18 30);
+  --bg-app:var(--paper);
+  --surface:#1a1510; --surface-2:#231d15;
+  --overlay:rgba(241,235,221,0.06);
+}
+/* ── Reset ───────────────────────────────────────────────── */
+*{box-sizing:border-box;-webkit-tap-highlight-color:transparent;}
+html,body,#root{margin:0;padding:0;height:100%;width:100%;overflow:hidden;background:var(--bg-app);color:var(--ink);font-family:var(--sans);font-size:16px;-webkit-font-smoothing:antialiased;}
+/* ── App shell ───────────────────────────────────────────── */
+.app-root{
+  position:fixed;inset:0;
+  background:var(--bg-app);
+  display:flex;flex-direction:column;
+  padding-top:env(safe-area-inset-top,44px);
+  transition:background .4s,color .4s;
+  overflow:hidden;
+}
+.screen-area{flex:1;min-height:0;position:relative;display:flex;flex-direction:column;}
+.screen-content{
+  flex:1;overflow-y:auto;-webkit-overflow-scrolling:touch;
+}
+.screen-content::-webkit-scrollbar{display:none;}
+.screen-content{scrollbar-width:none;}
+/* ── Tab bar ─────────────────────────────────────────────── */
+.tabbar{
+  height:calc(54px + env(safe-area-inset-bottom,0px));
+  padding:6px 8px env(safe-area-inset-bottom,8px);
+  display:flex;justify-content:space-around;align-items:flex-start;
+  background:color-mix(in oklab, var(--paper) 88%, transparent);
+  backdrop-filter:blur(20px) saturate(160%);
+  -webkit-backdrop-filter:blur(20px) saturate(160%);
+  border-top:.5px solid var(--rule);
+  flex-shrink:0;
+}
+.tab{
+  display:flex;flex-direction:column;align-items:center;gap:3px;
+  padding:6px 14px;border-radius:12px;
+  background:transparent;border:0;cursor:pointer;
+  color:var(--ink-4);font-family:var(--mono);font-size:9.5px;
+  letter-spacing:.14em;text-transform:uppercase;transition:color .15s;
+  min-width:60px;
+}
+.tab.active{color:var(--ink);}
+.tab svg{width:22px;height:22px;display:block;}
+/* ── Type helpers ────────────────────────────────────────── */
+.serif{font-family:var(--serif);font-weight:500;letter-spacing:-0.01em;}
+.mono{font-family:var(--mono);letter-spacing:0;}
+.mono-xs{font-family:var(--mono);font-size:10px;letter-spacing:.08em;text-transform:uppercase;}
+.eyebrow{font-family:var(--mono);font-size:10px;letter-spacing:.16em;text-transform:uppercase;color:var(--ink-3);}
+.row{display:flex;align-items:center;}
+.col{display:flex;flex-direction:column;}
+.grow{flex:1;min-height:0;min-width:0;}
+/* ── Animations ──────────────────────────────────────────── */
+@keyframes spin{to{transform:rotate(360deg);}}
+@keyframes slideUp{from{transform:translateY(100%);opacity:0;}to{transform:translateY(0);opacity:1;}}
+@keyframes fadeIn{from{opacity:0;transform:translateY(4px);}to{opacity:1;transform:none;}}
+/* ── Leaflet overrides ───────────────────────────────────── */
+.leaflet-container{background:var(--surface-2)!important;font-family:var(--mono)!important;}
+.leaflet-popup-content-wrapper{background:var(--paper);color:var(--ink);border-radius:10px;box-shadow:0 4px 20px rgba(0,0,0,.15);}
+.leaflet-popup-tip{background:var(--paper);}
+/* ── Debug panel ─────────────────────────────────────────── */
+#dbg-panel{
+  position:fixed;bottom:0;left:0;right:0;z-index:9999;
+  background:#1a1a1a;color:#00e676;font:11px/1.4 monospace;
+  padding:8px;max-height:180px;overflow-y:auto;
+  border-top:1px solid #333;display:none;
+}
+#dbg-panel.open{display:block;}
+#dbg-btn{
+  position:fixed;z-index:9998;
+  top:calc(env(safe-area-inset-top,44px) + 6px);right:14px;
+  background:rgba(0,0,0,.1);border:none;cursor:pointer;
+  font-size:13px;padding:5px 7px;border-radius:8px;
+  color:rgba(0,0,0,.3);
+}
+:root.dark #dbg-btn{color:rgba(255,255,255,.2);}
+  </style>
 </head>
 <body>
+<div id="root"></div>
 
-  <div class="app">
+<!-- Debug panel -->
+<div id="dbg-panel">
+  <div style="display:flex;justify-content:space-between;border-bottom:1px solid #333;padding-bottom:4px;margin-bottom:4px;">
+    <strong style="color:#fff;">DEBUG</strong>
+    <div style="display:flex;gap:8px;">
+      <button onclick="document.getElementById('dbg-log').innerHTML=''" style="background:none;border:1px solid #444;color:#666;font-size:10px;padding:2px 8px;border-radius:4px;cursor:pointer;">очистить</button>
+      <button onclick="document.getElementById('dbg-panel').classList.remove('open')" style="background:none;border:1px solid #444;color:#666;font-size:10px;padding:2px 8px;border-radius:4px;cursor:pointer;">×</button>
+    </div>
+  </div>
+  <div id="dbg-log"></div>
+</div>
+<button id="dbg-btn" onclick="document.getElementById('dbg-panel').classList.toggle('open')">🛠</button>
 
-    <header class="app-header">
-      <div class="logo">
-        <span class="logo-icon">🗺️</span>
-        <h1 class="logo-title">WanderTale</h1>
+<!-- React + Babel -->
+<script src="https://unpkg.com/react@18.3.1/umd/react.development.js" integrity="sha384-hD6/rw4ppMLGNu3tX5cjIb+uRZ7UkRJ6BPkLpg4hAu/6onKUg4lLsHAs9EBPT82L" crossorigin="anonymous"></script>
+<script src="https://unpkg.com/react-dom@18.3.1/umd/react-dom.development.js" integrity="sha384-u6aeetuaXnQ38mYT8rp6sbXaQe3NL9t+IBXmnYxwkUI2Hw4bsp2Wvmx4yRQF1uAm" crossorigin="anonymous"></script>
+<script src="https://unpkg.com/@babel/standalone@7.29.0/babel.min.js" integrity="sha384-m08KidiNqLdpJqLq95G/LEi8Qvjl/xUYll3QILypMoQ65QorJ9Lvtp2RXYGBFj1y" crossorigin="anonymous"></script>
+
+<script type="text/babel">
+/* ════════════════════════════════════════════════════════
+   WanderTale — React PWA
+   Design: Claude Design travelogue aesthetic
+   Backend: YandexGPT + SpeechKit via Railway
+════════════════════════════════════════════════════════ */
+
+const { useState, useEffect, useRef, useCallback } = React;
+
+/* ── Config ────────────────────────────────────────────────── */
+const API_BASE = window.location.hostname === 'localhost'
+  ? 'http://localhost:3000'
+  : 'https://wandertale-backend.onrender.com';   // ← Render.com
+const BACKEND_URL   = `${API_BASE}/narrate`;
+const MIN_DISTANCE  = 80;   // metres
+const MAX_HIST      = 20;
+
+/* ── Debug ─────────────────────────────────────────────────── */
+function dbg(msg) {
+  console.log('[WT]', msg);
+  const el = document.getElementById('dbg-log');
+  if (!el) return;
+  const d = document.createElement('div');
+  d.textContent = new Date().toLocaleTimeString('ru') + ' ' + msg;
+  el.prepend(d);
+}
+
+/* ── Icons ─────────────────────────────────────────────────── */
+const I = {
+  Home: p => <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" strokeLinejoin="round" {...p}><circle cx="12" cy="12" r="2.5"/><circle cx="12" cy="12" r="8.5"/><path d="M12 3.5v2M12 18.5v2M3.5 12h2M18.5 12h2"/></svg>,
+  Chat: p => <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" strokeLinejoin="round" {...p}><path d="M4 5.5h16v11H9l-5 4v-15z"/></svg>,
+  Bkmk: p => <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" strokeLinejoin="round" {...p}><path d="M6 4h12v17l-6-4-6 4V4z"/></svg>,
+  User: p => <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" strokeLinejoin="round" {...p}><circle cx="12" cy="9" r="3.5"/><path d="M5 20c1-4 4-6 7-6s6 2 7 6"/></svg>,
+  Play: p => <svg viewBox="0 0 24 24" fill="currentColor" {...p}><path d="M7 5.5v13l12-6.5-12-6.5z"/></svg>,
+  Pause: p => <svg viewBox="0 0 24 24" fill="currentColor" {...p}><rect x="6.5" y="5" width="4" height="14" rx="1"/><rect x="13.5" y="5" width="4" height="14" rx="1"/></svg>,
+  Pin: p => <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" strokeLinejoin="round" {...p}><path d="M12 21s7-6.5 7-12a7 7 0 10-14 0c0 5.5 7 12 7 12z"/><circle cx="12" cy="9" r="2.5"/></svg>,
+  Quill: p => <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" strokeLinejoin="round" {...p}><path d="M20 4s-2 10-8 14c-3 2-7 2-7 2l-1-1s0-4 2-7c4-6 14-8 14-8z"/><path d="M4 20l6-6"/></svg>,
+  Walk: p => <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" strokeLinejoin="round" {...p}><circle cx="13" cy="4.5" r="1.6"/><path d="M9 20l2-5-2-3V9l5-1 2.5 4 2.5 1"/><path d="M11 12l-3 3"/></svg>,
+  Back: p => <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" {...p}><path d="M14.5 5L7.5 12l7 7"/></svg>,
+  Vol: p => <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" strokeLinejoin="round" {...p}><path d="M4 10v4h3l4 3V7L7 10H4z"/><path d="M15 9a4 4 0 010 6M18 6a8 8 0 010 12"/></svg>,
+  Note: p => <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" strokeLinejoin="round" {...p}><path d="M5 4h10l4 4v12H5V4z"/><path d="M15 4v4h4M8 12h8M8 16h5"/></svg>,
+};
+
+/* ── Shared: Waveform ──────────────────────────────────────── */
+function Waveform({ active, height = 48, bars = 26, color = 'currentColor' }) {
+  const [seed, setSeed] = useState(0);
+  useEffect(() => {
+    if (!active) return;
+    const id = setInterval(() => setSeed(s => s + 1), 120);
+    return () => clearInterval(id);
+  }, [active]);
+  const hs = Array.from({ length: bars }, (_, i) => {
+    if (!active) return 0.12 + 0.08 * Math.sin(i * 0.6);
+    const t = seed * 0.3 + i * 0.45;
+    const b = 0.45 + 0.35 * Math.sin(t) * Math.cos(t * 0.3);
+    const n = 0.2 * Math.sin(t * 3.1 + seed);
+    return Math.max(0.08, Math.min(1, b + n));
+  });
+  return (
+    <div style={{ display:'flex', alignItems:'center', gap:3, height, width:'100%' }}>
+      {hs.map((h, i) => (
+        <div key={i} style={{
+          width:2.5, height:`${h * height}px`, borderRadius:2,
+          background: color,
+          transition: active ? 'height .15s ease' : 'height .4s ease',
+          opacity: active ? .95 : .45,
+        }}/>
+      ))}
+    </div>
+  );
+}
+
+/* ── Shared: Stamp ─────────────────────────────────────────── */
+function Stamp({ children, color = 'var(--stamp)' }) {
+  return <span style={{
+    fontFamily:'var(--mono)', fontSize:9.5, letterSpacing:'.2em',
+    textTransform:'uppercase', fontWeight:500, color,
+    border:`1px solid ${color}`, padding:'3px 7px 2px', borderRadius:2,
+    display:'inline-block', transform:'rotate(-1.5deg)', lineHeight:1.1,
+  }}>{children}</span>;
+}
+
+/* ── Shared: TabBar ────────────────────────────────────────── */
+function TabBar({ tab, setTab }) {
+  const tabs = [
+    { id:'home',    label:'Now',     Ic:I.Home },
+    { id:'story',   label:'Story',   Ic:I.Chat },
+    { id:'journal', label:'Journal', Ic:I.Bkmk },
+    { id:'profile', label:'You',     Ic:I.User },
+  ];
+  return (
+    <div className="tabbar">
+      {tabs.map(t => (
+        <button key={t.id} className={'tab' + (tab === t.id ? ' active' : '')} onClick={() => setTab(t.id)}>
+          <t.Ic /><span>{t.label}</span>
+        </button>
+      ))}
+    </div>
+  );
+}
+
+/* ── Helpers ───────────────────────────────────────────────── */
+function haversine(lat1, lon1, lat2, lon2) {
+  const R = 6371000, r = Math.PI / 180;
+  const dLat = (lat2-lat1)*r, dLon = (lon2-lon1)*r;
+  const a = Math.sin(dLat/2)**2 + Math.cos(lat1*r)*Math.cos(lat2*r)*Math.sin(dLon/2)**2;
+  return R * 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1-a));
+}
+
+function fmtElapsed(startMs) {
+  const s = Math.floor((Date.now() - startMs) / 1000);
+  if (s < 60) return `${s}с`;
+  if (s < 3600) return `${Math.floor(s/60)}м`;
+  return `${Math.floor(s/3600)}ч ${Math.floor((s%3600)/60)}м`;
+}
+
+function fmtTime() {
+  return new Date().toLocaleTimeString('ru', { hour:'2-digit', minute:'2-digit' });
+}
+
+/* ── HomeScreen ────────────────────────────────────────────── */
+function HomeScreen({ walking, audioPlaying, loading, currentPlace, sessionPlaces, bookmarkCount, sessionStart, userPos, onToggle, onOpenStory }) {
+  const mapRef       = useRef(null);
+  const mapInst      = useRef(null);
+  const userMark     = useRef(null);
+  const placeMark    = useRef(null);
+  const [clock, setClock] = useState(fmtTime());
+
+  // Clock tick
+  useEffect(() => {
+    const id = setInterval(() => setClock(fmtTime()), 15000);
+    return () => clearInterval(id);
+  }, []);
+
+  // Init Leaflet
+  useEffect(() => {
+    const el = mapRef.current;
+    if (!el) return;
+    const isDark = document.documentElement.classList.contains('dark');
+    const tileUrl = isDark
+      ? 'https://{s}.basemaps.cartocdn.com/dark_all/{z}/{x}/{y}{r}.png'
+      : 'https://{s}.basemaps.cartocdn.com/light_all/{z}/{x}/{y}{r}.png';
+    const m = L.map(el, { zoomControl:false, attributionControl:false, dragging:true });
+    L.tileLayer(tileUrl, { maxZoom:19 }).addTo(m);
+    m.setView([55.75, 37.61], 14);
+    mapInst.current = m;
+    return () => { m.remove(); mapInst.current = null; userMark.current = null; placeMark.current = null; };
+  }, []);
+
+  // User position on map
+  useEffect(() => {
+    const m = mapInst.current;
+    if (!m || !userPos) return;
+    const ll = [userPos.lat, userPos.lon];
+    if (userMark.current) {
+      userMark.current.setLatLng(ll);
+    } else {
+      const icon = L.divIcon({
+        className:'',
+        html:'<div style="width:14px;height:14px;background:var(--ink);border:2.5px solid var(--paper);border-radius:50%;box-shadow:0 2px 8px rgba(0,0,0,.3)"></div>',
+        iconSize:[14,14], iconAnchor:[7,7],
+      });
+      userMark.current = L.marker(ll, { icon }).addTo(m);
+    }
+    m.panTo(ll);
+  }, [userPos]);
+
+  // Place marker
+  useEffect(() => {
+    const m = mapInst.current;
+    if (!m || !currentPlace || !userPos) return;
+    if (placeMark.current) placeMark.current.remove();
+    const icon = L.divIcon({
+      className:'',
+      html:'<div style="width:10px;height:10px;background:#b87a30;border:2px solid var(--ink);border-radius:50%"></div>',
+      iconSize:[10,10], iconAnchor:[5,5],
+    });
+    placeMark.current = L.marker([userPos.lat, userPos.lon], { icon })
+      .addTo(m).bindTooltip(currentPlace.name, { permanent:false, direction:'top' });
+  }, [currentPlace, userPos]);
+
+  const isActive = walking || audioPlaying;
+  const elapsed  = sessionStart ? fmtElapsed(sessionStart) : '—';
+
+  return (
+    <div className="screen-content" style={{ padding:'12px 20px 20px' }}>
+
+      {/* masthead */}
+      <div className="row" style={{ justifyContent:'space-between', alignItems:'flex-end', marginBottom:18 }}>
+        <div className="col">
+          <div className="eyebrow" style={{ marginBottom:4 }}>WanderTale · {clock}</div>
+          <div className="serif" style={{ fontSize:28, lineHeight:1.05, letterSpacing:'-0.02em' }}>
+            Истории мест<br/>
+            <span style={{ fontStyle:'italic', color:'var(--ink-3)' }}>вокруг тебя</span>
+          </div>
+        </div>
+        <Stamp color={loading ? 'var(--ink-4)' : audioPlaying ? 'var(--accent-2)' : walking ? 'var(--stamp)' : 'var(--ink-4)'}>
+          {loading ? 'Loading' : audioPlaying ? 'Listening' : walking ? 'Walking' : 'Paused'}
+        </Stamp>
       </div>
-      <p class="logo-sub">Истории мест вокруг тебя</p>
-    </header>
 
-    <main class="app-main">
-
-      <div class="status-box" id="statusBox">
-        <span class="status-dot" id="statusDot"></span>
-        <span class="status-text" id="statusText">Нажмите кнопку, чтобы начать</span>
+      {/* stats strip */}
+      <div className="row" style={{
+        gap:0, borderTop:'.5px solid var(--rule)', borderBottom:'.5px solid var(--rule)',
+        padding:'10px 0', marginBottom:18,
+      }}>
+        {[ ['GPS', walking ? 'Вкл' : 'Выкл'], ['Места', sessionPlaces.length || '—'], ['Метки', bookmarkCount || '—'], ['Время', elapsed] ]
+          .map(([label, value], i) => (
+            <React.Fragment key={label}>
+              {i > 0 && <div style={{ width:.5, alignSelf:'stretch', background:'var(--rule)', margin:'0 6px' }}/>}
+              <div className="col grow" style={{ padding:'0 2px' }}>
+                <div style={{ fontFamily:'var(--mono)', fontSize:9, letterSpacing:'.16em', color:'var(--ink-3)', textTransform:'uppercase' }}>{label}</div>
+                <div style={{ fontFamily:'var(--serif)', fontSize:17, color:'var(--ink)', marginTop:1, fontWeight:500, whiteSpace:'nowrap' }}>{value}</div>
+              </div>
+            </React.Fragment>
+          ))}
       </div>
 
-      <button class="btn-main" id="mainBtn" onclick="toggleWalk()">
-        <span class="btn-icon" id="btnIcon">▶</span>
-        <span class="btn-label" id="btnLabel">Начать прогулку</span>
-      </button>
-
-      <div id="map" style="height:220px; border-radius:16px; overflow:hidden; margin:16px 0;"></div>
-
-      <div class="place-card" id="placeCard" aria-live="polite">
-        <div class="card-inner" id="cardInner">
-          <div class="card-placeholder">
-            <span class="card-placeholder-icon">📍</span>
-            <p>Здесь появится информация о ближайшем месте</p>
+      {/* main control */}
+      <div style={{
+        background:'var(--surface)', border:'.5px solid var(--rule)',
+        borderRadius:22, padding:'20px 18px 16px', marginBottom:16,
+      }}>
+        <div className="mono-xs" style={{ color:'var(--ink-3)', marginBottom:12 }}>
+          {loading ? '↻ Запрос к серверу...'
+            : audioPlaying ? '● Воспроизводится рассказ'
+            : walking ? '◉ Движение — жду места'
+            : '○ Нажмите ▶ чтобы начать'}
+        </div>
+        <div className="row" style={{ gap:16, alignItems:'center' }}>
+          <button onClick={onToggle} disabled={loading} style={{
+            width:66, height:66, borderRadius:'50%', border:0,
+            background: isActive ? 'var(--ink)' : 'var(--accent)',
+            color: isActive ? 'var(--paper)' : 'var(--accent-ink)',
+            cursor: loading ? 'default' : 'pointer',
+            display:'flex', alignItems:'center', justifyContent:'center',
+            flexShrink:0, transition:'all .2s', opacity: loading ? .6 : 1,
+            boxShadow: isActive ? '0 6px 18px rgba(0,0,0,.22)' : '0 6px 18px oklch(0.62 0.13 55 / 28%)',
+          }}>
+            {loading
+              ? <div style={{ width:20, height:20, border:'2px solid currentColor', borderTopColor:'transparent', borderRadius:'50%', animation:'spin 1s linear infinite' }}/>
+              : isActive ? <I.Pause style={{ width:24, height:24 }}/> : <I.Play style={{ width:24, height:24, marginLeft:3 }}/>}
+          </button>
+          <div className="grow" style={{ color:'var(--ink)' }}>
+            <Waveform active={audioPlaying} height={48} bars={26} color="var(--ink)"/>
           </div>
         </div>
       </div>
 
-      <div class="session-stats" id="sessionStats" hidden>
-        <span id="statsText"></span>
+      {/* leaflet map */}
+      <div style={{ marginBottom:16 }}>
+        <div className="row" style={{ justifyContent:'space-between', marginBottom:8 }}>
+          <span className="eyebrow">Карта прогулки</span>
+          {userPos && <span className="mono-xs" style={{ color:'var(--ink-3)' }}>
+            {userPos.lat.toFixed(4)}°N
+          </span>}
+        </div>
+        <div ref={mapRef} style={{ width:'100%', aspectRatio:'1.5/1', borderRadius:20, overflow:'hidden', background:'var(--surface-2)' }}/>
       </div>
 
-    </main>
+      {/* current place card */}
+      {currentPlace ? (
+        <button onClick={onOpenStory} style={{
+          textAlign:'left', width:'100%',
+          background:'var(--ink)', color:'var(--paper)',
+          border:0, borderRadius:20, padding:'16px 18px',
+          cursor:'pointer', display:'flex', gap:14, alignItems:'center',
+          fontFamily:'var(--sans)', marginBottom:16,
+        }}>
+          <div style={{
+            width:44, height:44, borderRadius:'50%',
+            border:'1px solid color-mix(in oklab, var(--paper) 35%, transparent)',
+            display:'flex', alignItems:'center', justifyContent:'center',
+            flexShrink:0, color:'var(--paper)',
+          }}>
+            <I.Quill style={{ width:20, height:20 }}/>
+          </div>
+          <div className="col grow" style={{ minWidth:0 }}>
+            <div className="mono-xs" style={{ color:'color-mix(in oklab, var(--paper) 55%, transparent)', marginBottom:2 }}>
+              О чём речь сейчас
+            </div>
+            <div className="serif" style={{ fontSize:17, letterSpacing:'-0.01em', lineHeight:1.25 }}>
+              {currentPlace.name}
+            </div>
+            {currentPlace.address && <div style={{ fontSize:12, color:'color-mix(in oklab, var(--paper) 60%, transparent)', marginTop:2, whiteSpace:'nowrap', overflow:'hidden', textOverflow:'ellipsis' }}>
+              {currentPlace.address}
+            </div>}
+          </div>
+          <I.Back style={{ width:18, height:18, transform:'rotate(180deg)', opacity:.5, flexShrink:0 }}/>
+        </button>
+      ) : (
+        <div style={{
+          textAlign:'center', padding:'26px 16px',
+          background:'var(--surface)', border:'.5px solid var(--rule)',
+          borderRadius:20, color:'var(--ink-3)', marginBottom:16,
+        }}>
+          <div className="serif" style={{ fontSize:19, marginBottom:8 }}>
+            {walking ? 'Ищу места рядом...' : 'Начните прогулку'}
+          </div>
+          <div className="mono-xs">
+            {walking ? 'Двигайтесь — я расскажу о том, что встречается' : 'Нажмите ▶ — включится GPS и начнётся рассказ'}
+          </div>
+        </div>
+      )}
 
-    <footer class="app-footer">
-      <p>Двигайтесь — и мир заговорит с вами</p>
-    </footer>
-
-  </div>
-
-  <script src="app.js"></script>
-  <a href="debug.html" style="position:fixed;top:16px;right:16px;background:rgba(255,255,255,0.1);color:#666;font-size:11px;padding:6px 10px;border-radius:8px;text-decoration:none;">🛠 Debug</a>
-
-  <div id="debug-panel" style="position:fixed;bottom:0;left:0;right:0;background:#1e1e1e;color:#00ff00;font-size:11px;font-family:monospace;padding:8px;max-height:180px;overflow-y:auto;z-index:9999;border-top:1px solid #333;">
-    <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:4px;">
-      <strong>DEBUG</strong>
-      <button onclick="document.getElementById('debug-log').innerHTML=''" style="background:none;border:1px solid #444;color:#666;font-size:10px;padding:2px 8px;border-radius:4px;cursor:pointer;">очистить</button>
+      {/* visited places */}
+      {sessionPlaces.length > 0 && (
+        <div>
+          <div className="eyebrow" style={{ marginBottom:10 }}>Уже посетили</div>
+          <div className="col" style={{ gap:8 }}>
+            {[...sessionPlaces].reverse().slice(0, 4).map((p, i) => (
+              <div key={i} className="row" style={{
+                gap:12, padding:'10px 12px',
+                background:'var(--surface)', border:'.5px solid var(--rule)',
+                borderRadius:14, alignItems:'center',
+              }}>
+                <div style={{
+                  width:26, height:26, flexShrink:0, borderRadius:'50%',
+                  display:'flex', alignItems:'center', justifyContent:'center',
+                  fontFamily:'var(--mono)', fontSize:11,
+                  background:'var(--paper-2)', color:'var(--ink-2)',
+                  border:'.5px solid var(--rule)',
+                }}>{sessionPlaces.length - i}</div>
+                <div style={{ fontSize:13.5, fontWeight:500, color:'var(--ink)', minWidth:0, whiteSpace:'nowrap', overflow:'hidden', textOverflow:'ellipsis' }}>
+                  {p.name || String(p)}
+                </div>
+              </div>
+            ))}
+          </div>
+        </div>
+      )}
     </div>
-    <div id="debug-log"></div>
-  </div>
-  <script>
-    if ('serviceWorker' in navigator) {
-      window.addEventListener('load', () => {
-        navigator.serviceWorker.register('/wandertale-pwa/sw.js')
-          .then(reg => console.log('SW registered:', reg.scope))
-          .catch(err => console.log('SW error:', err));
+  );
+}
+
+/* ── StoryScreen ───────────────────────────────────────────── */
+function StoryScreen({ messages, bookmarks, onBookmark }) {
+  const [activeBubble, setActiveBubble] = useState(null);
+  const [sheet, setSheet]               = useState(null);
+  const scrollRef = useRef(null);
+
+  useEffect(() => {
+    if (scrollRef.current) scrollRef.current.scrollTop = scrollRef.current.scrollHeight;
+  }, [messages]);
+
+  const isBookmarked = id => bookmarks.some(b => b.id === id);
+
+  return (
+    <div style={{ position:'relative', height:'100%', display:'flex', flexDirection:'column' }}>
+      {/* header */}
+      <div style={{
+        padding:'10px 18px', borderBottom:'.5px solid var(--rule)',
+        display:'flex', alignItems:'center', gap:12,
+        background:'var(--paper)', flexShrink:0,
+      }}>
+        <div className="col grow" style={{ minWidth:0 }}>
+          <div className="eyebrow" style={{ marginBottom:2 }}>Прогулка · транскрипт</div>
+          <div className="serif" style={{ fontSize:18, letterSpacing:'-0.01em' }}>Рассказ</div>
+        </div>
+        <div style={{
+          width:36, height:36, borderRadius:'50%',
+          border:'.5px solid var(--rule)', background:'var(--surface)',
+          display:'flex', alignItems:'center', justifyContent:'center',
+        }}>
+          <I.Vol style={{ width:20, height:20 }}/>
+        </div>
+      </div>
+
+      {/* messages */}
+      <div ref={scrollRef} className="grow" style={{ overflowY:'auto', padding:'16px 16px 130px', WebkitOverflowScrolling:'touch' }}>
+        {messages.length === 0 ? (
+          <div style={{ textAlign:'center', padding:'50px 20px', color:'var(--ink-3)' }}>
+            <div className="serif" style={{ fontSize:20, marginBottom:10 }}>История пустая</div>
+            <div className="mono-xs">Начните прогулку — рассказ появится здесь</div>
+          </div>
+        ) : messages.map(m => {
+          if (m.type === 'place') return (
+            <div key={m.id} style={{ margin:'24px 0 14px' }}>
+              <div className="row" style={{ gap:8, marginBottom:4 }}>
+                <div className="mono-xs" style={{ color:'var(--ink-3)', flexShrink:0 }}>{m.index}</div>
+                <div style={{ flex:1, height:.5, background:'var(--rule)' }}/>
+                <div className="mono-xs" style={{ color:'var(--ink-3)', flexShrink:0 }}>{m.time}</div>
+              </div>
+              <div className="serif" style={{ fontSize:16, letterSpacing:'-0.01em', lineHeight:1.2 }}>{m.title}</div>
+              {m.subtitle && <div className="mono-xs" style={{ color:'var(--ink-3)', marginTop:2 }}>{m.subtitle}</div>}
+            </div>
+          );
+          return (
+            <div key={m.id} onClick={() => setActiveBubble(m.id)} style={{
+              padding:'14px 16px',
+              background: activeBubble === m.id ? 'var(--surface)' : 'transparent',
+              border: activeBubble === m.id ? '.5px solid var(--rule)' : '.5px solid transparent',
+              borderRadius:18, marginBottom:10, cursor:'pointer',
+              transition:'all .2s', animation:'fadeIn .3s ease',
+            }}>
+              <div className="row" style={{ gap:10, marginBottom:8, alignItems:'center' }}>
+                <div style={{
+                  width:24, height:24, borderRadius:'50%',
+                  background:'var(--ink)', color:'var(--paper)',
+                  display:'flex', alignItems:'center', justifyContent:'center', flexShrink:0,
+                }}>
+                  <I.Quill style={{ width:12, height:12 }}/>
+                </div>
+                <span className="mono-xs" style={{ color:'var(--ink-3)' }}>Рассказчик · {m.time}</span>
+                <div className="grow"/>
+                {activeBubble === m.id && (
+                  <button onClick={e => { e.stopPropagation(); setSheet({ msgId:m.id }); }} style={{
+                    background:'transparent', border:0, padding:2, cursor:'pointer',
+                    color: isBookmarked(m.id) ? 'var(--stamp)' : 'var(--ink-3)',
+                  }}>
+                    <I.Pin style={{ width:16, height:16 }}/>
+                  </button>
+                )}
+              </div>
+              <div className="serif" style={{ fontSize:16, lineHeight:1.5, color:'var(--ink)', letterSpacing:'-0.005em' }}>
+                {m.text}
+              </div>
+              {isBookmarked(m.id) && (
+                <div style={{ marginTop:10, display:'flex' }}>
+                  <Stamp>★ Метка сохранена</Stamp>
+                </div>
+              )}
+            </div>
+          );
+        })}
+      </div>
+
+      {/* sticky bookmark button */}
+      {activeBubble && messages.find(m => m.id === activeBubble && m.type === 'bubble') && (
+        <div style={{
+          position:'absolute', bottom:0, left:0, right:0,
+          padding:'10px 16px 18px',
+          background:'linear-gradient(to top, var(--paper) 65%, transparent)',
+        }}>
+          <button onClick={() => setSheet({ msgId: activeBubble })} style={{
+            width:'100%', padding:'14px 18px',
+            background:'var(--ink)', color:'var(--paper)',
+            border:0, borderRadius:16, cursor:'pointer',
+            display:'flex', alignItems:'center', justifyContent:'center', gap:10,
+            fontFamily:'var(--sans)', fontWeight:500, fontSize:14.5,
+            boxShadow:'0 10px 30px rgba(0,0,0,.18)',
+          }}>
+            <I.Pin style={{ width:18, height:18 }}/>
+            Поставить метку
+          </button>
+        </div>
+      )}
+
+      {sheet && (
+        <BookmarkSheet
+          onClose={() => setSheet(null)}
+          onSave={(note, emo) => {
+            const msg = messages.find(m => m.id === sheet.msgId);
+            onBookmark({ id: sheet.msgId, note, emo, time: msg?.time || '', place: msg?.placeTitle || '' });
+            setSheet(null);
+          }}
+        />
+      )}
+    </div>
+  );
+}
+
+/* ── BookmarkSheet ─────────────────────────────────────────── */
+function BookmarkSheet({ onClose, onSave }) {
+  const [note, setNote] = useState('');
+  const [emo,  setEmo]  = useState('★');
+  return (
+    <>
+      <div onClick={onClose} style={{ position:'absolute', inset:0, background:'rgba(10,8,6,.5)', zIndex:90 }}/>
+      <div style={{
+        position:'absolute', bottom:0, left:0, right:0, zIndex:91,
+        background:'var(--paper)', borderRadius:'22px 22px 0 0',
+        padding:'10px 20px 28px', animation:'slideUp .25s ease',
+      }}>
+        <div style={{ width:36, height:4, background:'var(--rule)', borderRadius:2, margin:'0 auto 16px' }}/>
+        <div className="serif" style={{ fontSize:20, letterSpacing:'-0.01em', marginBottom:14 }}>Поставить метку</div>
+
+        <div className="mono-xs" style={{ color:'var(--ink-3)', marginBottom:6 }}>Пометка</div>
+        <div className="row" style={{ gap:8, marginBottom:14 }}>
+          {['★','♡','?','!','◎'].map(e => (
+            <button key={e} onClick={() => setEmo(e)} style={{
+              width:42, height:42, borderRadius:'50%',
+              border: emo === e ? '1.5px solid var(--ink)' : '.5px solid var(--rule)',
+              background: emo === e ? 'var(--surface-2)' : 'var(--surface)',
+              fontSize:17, cursor:'pointer', color:'var(--ink)',
+            }}>{e}</button>
+          ))}
+        </div>
+
+        <div className="mono-xs" style={{ color:'var(--ink-3)', marginBottom:6 }}>Заметка (необязательно)</div>
+        <textarea value={note} onChange={e => setNote(e.target.value)}
+          placeholder="Вернусь сюда…"
+          style={{
+            width:'100%', minHeight:64, padding:12, borderRadius:12,
+            border:'.5px solid var(--rule)', background:'var(--surface)',
+            fontFamily:'var(--serif)', fontSize:15, color:'var(--ink)',
+            resize:'none', outline:'none',
+          }}
+        />
+        <div className="row" style={{ gap:10, marginTop:14 }}>
+          <button onClick={onClose} style={{ flex:1, padding:13, borderRadius:12, border:'.5px solid var(--rule)', background:'var(--surface)', color:'var(--ink-2)', fontFamily:'var(--sans)', fontWeight:500, fontSize:14, cursor:'pointer' }}>Отмена</button>
+          <button onClick={() => onSave(note, emo)} style={{ flex:2, padding:13, borderRadius:12, border:0, background:'var(--ink)', color:'var(--paper)', fontFamily:'var(--sans)', fontWeight:500, fontSize:14, cursor:'pointer' }}>Сохранить метку</button>
+        </div>
+      </div>
+    </>
+  );
+}
+
+/* ── JournalScreen ─────────────────────────────────────────── */
+function JournalScreen({ bookmarks }) {
+  return (
+    <div className="screen-content" style={{ padding:'14px 20px 20px' }}>
+      {/* header */}
+      <div className="row" style={{ justifyContent:'space-between', alignItems:'flex-end', marginBottom:18 }}>
+        <div className="col">
+          <div className="eyebrow" style={{ marginBottom:4 }}>Журнал прогулок</div>
+          <div className="serif" style={{ fontSize:28, letterSpacing:'-0.02em', lineHeight:1 }}>
+            Твои <span style={{ fontStyle:'italic' }}>метки</span>
+          </div>
+        </div>
+        <Stamp color="var(--accent-2)">{bookmarks.length} шт.</Stamp>
+      </div>
+
+      {bookmarks.length === 0 ? (
+        <div style={{
+          textAlign:'center', padding:'50px 20px',
+          background:'var(--surface)', border:'.5px solid var(--rule)',
+          borderRadius:20, color:'var(--ink-3)',
+        }}>
+          <div className="serif" style={{ fontSize:20, marginBottom:10 }}>Меток пока нет</div>
+          <div className="mono-xs">Во время прогулки отметьте интересные моменты — они появятся здесь</div>
+        </div>
+      ) : (
+        <div className="col" style={{ gap:10 }}>
+          {[...bookmarks].reverse().map((bm, i) => (
+            <div key={bm.id + i} style={{
+              background:'var(--surface)', border:'.5px solid var(--rule)',
+              borderRadius:16, padding:'12px 14px',
+              display:'flex', gap:12,
+            }}>
+              <div style={{
+                width:36, height:36, borderRadius:'50%',
+                background:'var(--paper-2)', border:'.5px solid var(--rule)',
+                display:'flex', alignItems:'center', justifyContent:'center',
+                fontSize:16, color:'var(--stamp)', flexShrink:0,
+              }}>{bm.emo || '★'}</div>
+              <div className="col grow" style={{ minWidth:0 }}>
+                <div className="row" style={{ gap:8, alignItems:'center', marginBottom:4 }}>
+                  <div style={{ fontSize:13, fontWeight:500, whiteSpace:'nowrap', overflow:'hidden', textOverflow:'ellipsis' }}>
+                    {bm.place || 'Место'}
+                  </div>
+                  <div className="mono-xs" style={{ color:'var(--ink-3)', whiteSpace:'nowrap', marginLeft:'auto' }}>{bm.time}</div>
+                </div>
+                {bm.note && (
+                  <div style={{
+                    marginTop:4, padding:'6px 10px',
+                    background:'color-mix(in oklab, var(--accent) 10%, transparent)',
+                    borderLeft:'2px solid var(--accent)',
+                    fontSize:12.5, color:'var(--ink-2)',
+                  }}>
+                    <span className="mono-xs" style={{ color:'var(--ink-3)', marginRight:6 }}>заметка</span>
+                    {bm.note}
+                  </div>
+                )}
+              </div>
+            </div>
+          ))}
+        </div>
+      )}
+    </div>
+  );
+}
+
+/* ── ProfileScreen ─────────────────────────────────────────── */
+function ProfileScreen({ dark, setDark }) {
+  const [voice, setVoice] = useState('guide');
+  const [pace,  setPace]  = useState(1);
+  const [themes, setThemes] = useState({ history:true, architecture:true, legends:true, people:false, food:false });
+
+  const VOICES = [
+    { id:'guide',   init:'Г', name:'Гид',          desc:'Спокойный, как в музее',         bg:'oklch(0.45 0.06 50)' },
+    { id:'friend',  init:'Д', name:'Друг',          desc:'Разговорный, чуть иронично',      bg:'oklch(0.55 0.1 30)' },
+    { id:'writer',  init:'П', name:'Писатель',      desc:'Литературно, с метафорами',       bg:'oklch(0.4 0.06 270)' },
+    { id:'scholar', init:'И', name:'Исследователь', desc:'Подробно, с датами и фактами',    bg:'oklch(0.45 0.06 150)' },
+  ];
+  const PACE_LABELS = ['Только главное','Средний','Подробный','Как в книге'];
+  const PACE_MIN    = [1, 2.5, 5, 9];
+  const THEMES = {
+    history:      { icon:'⌛', title:'История',         desc:'Даты, события, имена' },
+    architecture: { icon:'⌂', title:'Архитектура',      desc:'Стили, детали, архитекторы' },
+    legends:      { icon:'✦', title:'Легенды',           desc:'Мифы и городские истории' },
+    people:       { icon:'☺', title:'Люди',              desc:'Кто здесь жил и работал' },
+    food:         { icon:'◐', title:'Кухня и быт',       desc:'Рестораны, лавки, традиции' },
+  };
+
+  const S = ({ title, desc, children }) => (
+    <div style={{ marginBottom:22 }}>
+      <div style={{ marginBottom:10 }}>
+        <div className="serif" style={{ fontSize:18, letterSpacing:'-0.01em', lineHeight:1.2 }}>{title}</div>
+        {desc && <div className="mono-xs" style={{ color:'var(--ink-3)', marginTop:3 }}>{desc}</div>}
+      </div>
+      {children}
+    </div>
+  );
+
+  return (
+    <div className="screen-content" style={{ padding:'14px 20px 20px' }}>
+      {/* avatar header */}
+      <div className="row" style={{ gap:16, marginBottom:24, alignItems:'center' }}>
+        <div style={{
+          width:64, height:64, borderRadius:'50%',
+          background:'var(--paper-3)', border:'.5px solid var(--rule)',
+          display:'flex', alignItems:'center', justifyContent:'center',
+          fontFamily:'var(--serif)', fontSize:26, fontWeight:500, color:'var(--ink)',
+        }}>WT</div>
+        <div className="col">
+          <div className="eyebrow" style={{ marginBottom:3 }}>Путешественник</div>
+          <div className="serif" style={{ fontSize:22, letterSpacing:'-0.01em', lineHeight:1.1 }}>WanderTale</div>
+          <div className="mono-xs" style={{ color:'var(--ink-3)', marginTop:4 }}>v0.5.0 · audio guide</div>
+        </div>
+      </div>
+
+      {/* voice */}
+      <S title="Голос рассказчика" desc="Кто ведёт тебя по городу">
+        <div className="col" style={{ gap:8 }}>
+          {VOICES.map(v => (
+            <button key={v.id} onClick={() => setVoice(v.id)} style={{
+              display:'flex', gap:12, padding:'12px 14px', alignItems:'center',
+              border: voice === v.id ? '1px solid var(--ink)' : '.5px solid var(--rule)',
+              background: voice === v.id ? 'var(--surface-2)' : 'var(--surface)',
+              borderRadius:14, cursor:'pointer', textAlign:'left', fontFamily:'var(--sans)',
+            }}>
+              <div style={{ width:38, height:38, borderRadius:'50%', background:v.bg, color:'var(--paper)', display:'flex', alignItems:'center', justifyContent:'center', fontFamily:'var(--serif)', fontWeight:500, fontSize:14, flexShrink:0 }}>{v.init}</div>
+              <div className="col grow" style={{ minWidth:0 }}>
+                <div style={{ fontSize:14, fontWeight:500, color:'var(--ink)' }}>{v.name}</div>
+                <div style={{ fontSize:12, color:'var(--ink-3)', whiteSpace:'nowrap', overflow:'hidden', textOverflow:'ellipsis' }}>{v.desc}</div>
+              </div>
+              <div style={{ color: voice === v.id ? 'var(--ink)' : 'var(--ink-4)' }}>{voice === v.id ? '●' : '○'}</div>
+            </button>
+          ))}
+        </div>
+      </S>
+
+      {/* pace */}
+      <S title="Темп рассказа" desc="Насколько подробно">
+        <div style={{ background:'var(--surface)', border:'.5px solid var(--rule)', borderRadius:14, padding:'14px 16px' }}>
+          <div className="row" style={{ justifyContent:'space-between', marginBottom:10 }}>
+            <span className="mono-xs" style={{ color:'var(--ink-3)' }}>{PACE_LABELS[pace]}</span>
+            <span className="mono-xs" style={{ color:'var(--ink-3)' }}>~{PACE_MIN[pace]} мин/место</span>
+          </div>
+          <div className="row" style={{ gap:6 }}>
+            {[0,1,2,3].map(i => (
+              <button key={i} onClick={() => setPace(i)} style={{
+                flex:1, height:34, border:0, borderRadius:8,
+                background: i <= pace ? 'var(--ink)' : 'var(--paper-3)',
+                cursor:'pointer', color:'var(--paper)',
+                fontFamily:'var(--mono)', fontSize:11,
+              }}>{['○','●','●','●'][i]}</button>
+            ))}
+          </div>
+        </div>
+      </S>
+
+      {/* interests */}
+      <S title="Интересы" desc="О чём рассказывать">
+        <div style={{ background:'var(--surface)', border:'.5px solid var(--rule)', borderRadius:14, overflow:'hidden' }}>
+          {Object.entries(THEMES).map(([k, t], i) => (
+            <div key={k} style={{
+              display:'flex', padding:'12px 14px', alignItems:'center', gap:12,
+              borderBottom: i < Object.keys(THEMES).length - 1 ? '.5px solid var(--rule)' : 0,
+            }}>
+              <div style={{ fontSize:18, width:22, textAlign:'center', color:'var(--ink-3)' }}>{t.icon}</div>
+              <div className="col grow">
+                <div style={{ fontSize:14, fontWeight:500 }}>{t.title}</div>
+                <div className="mono-xs" style={{ color:'var(--ink-3)', marginTop:2 }}>{t.desc}</div>
+              </div>
+              <div onClick={() => setThemes(x => ({ ...x, [k]: !x[k] }))} style={{
+                width:40, height:24, borderRadius:14,
+                background: themes[k] ? 'var(--ink)' : 'var(--paper-3)',
+                position:'relative', transition:'all .15s', cursor:'pointer', flexShrink:0,
+              }}>
+                <div style={{
+                  position:'absolute', top:2,
+                  left: themes[k] ? 18 : 2,
+                  width:20, height:20, borderRadius:'50%',
+                  background:'var(--paper)', transition:'left .15s',
+                  boxShadow:'0 1px 3px rgba(0,0,0,.2)',
+                }}/>
+              </div>
+            </div>
+          ))}
+        </div>
+      </S>
+
+      {/* appearance */}
+      <S title="Оформление">
+        <div style={{ background:'var(--surface)', border:'.5px solid var(--rule)', borderRadius:14, padding:3, display:'flex' }}>
+          {[{id:'light', label:'☀ День'}, {id:'dark', label:'☾ Вечер'}].map(m => (
+            <button key={m.id} onClick={() => setDark(m.id === 'dark')} style={{
+              flex:1, padding:'10px 0', borderRadius:11,
+              background: (m.id==='dark') === dark ? 'var(--ink)' : 'transparent',
+              color: (m.id==='dark') === dark ? 'var(--paper)' : 'var(--ink-3)',
+              border:0, fontFamily:'var(--sans)', fontWeight:500, fontSize:13,
+              cursor:'pointer', letterSpacing:'-0.01em',
+            }}>{m.label}</button>
+          ))}
+        </div>
+      </S>
+
+      <div style={{ textAlign:'center', marginTop:4 }}>
+        <div className="mono-xs" style={{ color:'var(--ink-4)' }}>WanderTale · v0.5.0 · travelogue</div>
+      </div>
+    </div>
+  );
+}
+
+/* ── App root ───────────────────────────────────────────────── */
+function App() {
+  /* navigation & theme */
+  const [tab,  setTab]  = useState(() => localStorage.getItem('wt_tab') || 'home');
+  const [dark, setDark] = useState(() => {
+    const v = localStorage.getItem('wt_dark');
+    return v == null ? window.matchMedia('(prefers-color-scheme: dark)').matches : v === '1';
+  });
+
+  /* backend / GPS state — dual pattern: state for renders, refs for callbacks */
+  const [walking,       setWalking]       = useState(false);
+  const [audioPlaying,  setAudioPlaying]  = useState(false);
+  const [loading,       setLoading]       = useState(false);
+  const [userPos,       setUserPos]       = useState(null);
+  const [currentPlace,  setCurrentPlace]  = useState(null);
+  const [sessionPlaces, setSessionPlaces] = useState([]);
+  const [sessionStart,  setSessionStart]  = useState(null);
+  const [messages,      setMessages]      = useState([]);
+  const [bookmarks,     setBookmarks]     = useState(() => {
+    try { return JSON.parse(localStorage.getItem('wt_bookmarks') || '[]'); }
+    catch { return []; }
+  });
+
+  const walkingRef       = useRef(false);
+  const loadingRef       = useRef(false);
+  const audioPlayingRef  = useRef(false);
+  const lastPosRef       = useRef(null);
+  const sessionPlRef     = useRef([]);
+  const pollRef          = useRef(null);
+  const audioRef         = useRef(null);
+  const msgIdRef         = useRef(0);
+
+  /* sync dark mode */
+  useEffect(() => {
+    document.documentElement.classList.toggle('dark', dark);
+    localStorage.setItem('wt_dark', dark ? '1' : '0');
+  }, [dark]);
+  useEffect(() => { localStorage.setItem('wt_tab', tab); }, [tab]);
+  useEffect(() => { localStorage.setItem('wt_bookmarks', JSON.stringify(bookmarks)); }, [bookmarks]);
+
+  /* audio helpers */
+  const stopAudio = useCallback(() => {
+    if (audioRef.current) { audioRef.current.pause(); audioRef.current = null; }
+    if (window.speechSynthesis) window.speechSynthesis.cancel();
+    audioPlayingRef.current = false;
+    setAudioPlaying(false);
+  }, []);
+
+  const playBuffer = useCallback(async (arrayBuffer) => {
+    stopAudio();
+    try {
+      const blob  = new Blob([arrayBuffer], { type:'audio/mpeg' });
+      const url   = URL.createObjectURL(blob);
+      const audio = new Audio(url);
+      audio.volume = 1.0;
+      audioRef.current = audio;
+      await new Promise((res) => {
+        audio.onended = () => { audioPlayingRef.current=false; setAudioPlaying(false); URL.revokeObjectURL(url); dbg('▶ Audio ended'); res(); };
+        audio.onerror = (e) => { dbg('Audio error: '+(e.message||'?')); audioPlayingRef.current=false; setAudioPlaying(false); res(); };
+        audio.play().then(() => { audioPlayingRef.current=true; setAudioPlaying(true); }).catch(e => { dbg('play() failed: '+e.message); res(); });
       });
+    } catch(e) {
+      dbg('playBuffer: '+e.message);
+      audioPlayingRef.current=false; setAudioPlaying(false);
     }
-  </script>
+  }, [stopAudio]);
+
+  const unlockAudio = useCallback(async () => {
+    try {
+      const Ctx = window.AudioContext || window.webkitAudioContext;
+      if (!Ctx) return;
+      const ctx = new Ctx();
+      const buf = ctx.createBuffer(1,1,22050);
+      const src = ctx.createBufferSource(); src.buffer=buf;
+      src.connect(ctx.destination); src.start(0);
+      await ctx.close();
+    } catch(e) { dbg('AudioContext unlock: '+e.message); }
+  }, []);
+
+  /* fetch narration */
+  const fetchNarration = useCallback(async (lat, lon) => {
+    loadingRef.current = true;
+    setLoading(true);
+    dbg('→ POST /narrate ' + lat.toFixed(5) + ',' + lon.toFixed(5));
+
+    let response;
+    try {
+      response = await fetch(BACKEND_URL, {
+        method:'POST', mode:'cors', credentials:'omit',
+        headers:{ 'Content-Type':'application/json' },
+        body: JSON.stringify({ lat, lon }),
+      });
+    } catch(e) {
+      dbg('Fetch error: '+e.message);
+      loadingRef.current=false; setLoading(false); return;
+    }
+
+    dbg('← '+response.status+' '+( response.headers.get('content-type')||''));
+
+    if (response.status === 204) {
+      dbg('No place nearby — skip');
+      loadingRef.current=false; setLoading(false); return;
+    }
+
+    const ct = response.headers.get('content-type') || '';
+
+    /* ── audio response ── */
+    if (ct.includes('audio/mpeg')) {
+      const name    = decodeURIComponent(response.headers.get('x-place')   || 'Место');
+      const addr    = decodeURIComponent(response.headers.get('x-address') || '');
+      const type    = decodeURIComponent(response.headers.get('x-type')    || '');
+      const narr    = response.headers.get('x-narration') || '';
+
+      dbg('📍 '+name+' · '+addr);
+
+      /* dedup */
+      if (sessionPlRef.current.find(p => p.name === name)) {
+        dbg('Already seen: '+name);
+        loadingRef.current=false; setLoading(false); return;
+      }
+
+      const placeObj = { name, address: addr, type };
+      sessionPlRef.current = [...sessionPlRef.current, placeObj].slice(-MAX_HIST);
+      setSessionPlaces([...sessionPlRef.current]);
+      setCurrentPlace(placeObj);
+      lastPosRef.current = { lat, lon };
+
+      const t = fmtTime();
+      const idx = `№ ${sessionPlRef.current.length.toString().padStart(2,'0')}`;
+      const pid = ++msgIdRef.current;
+      const mid = ++msgIdRef.current;
+      setMessages(prev => [
+        ...prev,
+        { id:pid, type:'place', index:idx, title:name, subtitle:addr, time:t },
+        { id:mid, type:'bubble', text: narr ? decodeURIComponent(narr) : '…', time:t, placeTitle:name },
+      ]);
+
+      let buf;
+      try { buf = await response.arrayBuffer(); }
+      catch(e) { dbg('arrayBuffer: '+e.message); loadingRef.current=false; setLoading(false); return; }
+
+      loadingRef.current=false; setLoading(false);
+      await playBuffer(buf);
+      return;
+    }
+
+    /* ── JSON response ── */
+    let data;
+    try { data = await response.json(); }
+    catch(e) { dbg('JSON: '+e.message); loadingRef.current=false; setLoading(false); return; }
+
+    if (data.error) {
+      dbg('Server error: '+data.message);
+      loadingRef.current=false; setLoading(false); return;
+    }
+
+    const name = data.place || 'Место рядом';
+    const narr = data.narration || '';
+
+    if (sessionPlRef.current.find(p => p.name === name)) {
+      loadingRef.current=false; setLoading(false); return;
+    }
+
+    const placeObj = { name, address:'', type:'' };
+    sessionPlRef.current = [...sessionPlRef.current, placeObj].slice(-MAX_HIST);
+    setSessionPlaces([...sessionPlRef.current]);
+    setCurrentPlace(placeObj);
+    lastPosRef.current = { lat, lon };
+
+    const t = fmtTime();
+    const pid = ++msgIdRef.current;
+    const mid = ++msgIdRef.current;
+    setMessages(prev => [
+      ...prev,
+      { id:pid, type:'place', index:`№ ${sessionPlRef.current.length.toString().padStart(2,'0')}`, title:name, time:t },
+      { id:mid, type:'bubble', text:narr, time:t, placeTitle:name },
+    ]);
+    loadingRef.current=false; setLoading(false);
+
+    if (narr && data.audio === false && window.speechSynthesis) {
+      const u = new SpeechSynthesisUtterance(narr);
+      u.lang = 'ru-RU';
+      window.speechSynthesis.speak(u);
+    }
+  }, [playBuffer]);
+
+  /* GPS */
+  const onPosition = useCallback((pos) => {
+    const { latitude:lat, longitude:lon } = pos.coords;
+    setUserPos({ lat, lon });
+    if (loadingRef.current || audioPlayingRef.current) return;
+    if (lastPosRef.current) {
+      const d = haversine(lastPosRef.current.lat, lastPosRef.current.lon, lat, lon);
+      if (d < MIN_DISTANCE) return;
+    }
+    fetchNarration(lat, lon);
+  }, [fetchNarration]);
+
+  const startGPS = useCallback(() => {
+    const poll = () => navigator.geolocation.getCurrentPosition(
+      onPosition,
+      err => dbg('GPS: '+err.message+' ('+err.code+')'),
+      { enableHighAccuracy:false, timeout:10000, maximumAge:20000 }
+    );
+    poll();
+    pollRef.current = setInterval(poll, 15000);
+  }, [onPosition]);
+
+  const stopGPS = useCallback(() => {
+    if (pollRef.current) { clearInterval(pollRef.current); pollRef.current=null; }
+  }, []);
+
+  /* toggle walk */
+  const toggleWalk = useCallback(async () => {
+    if (walkingRef.current) {
+      stopGPS(); stopAudio();
+      walkingRef.current=false; loadingRef.current=false;
+      lastPosRef.current=null; sessionPlRef.current=[];
+      setWalking(false); setLoading(false);
+      setSessionPlaces([]); setSessionStart(null); setCurrentPlace(null);
+      dbg('■ Прогулка остановлена');
+    } else {
+      if (!('geolocation' in navigator)) { dbg('Геолокация недоступна'); return; }
+      await unlockAudio();
+      walkingRef.current=true;
+      setWalking(true); setSessionStart(Date.now());
+      dbg('▶ Прогулка начата · GPS каждые 15с');
+      startGPS();
+    }
+  }, [stopGPS, stopAudio, unlockAudio, startGPS]);
+
+  const addBookmark = useCallback((bm) => {
+    setBookmarks(prev => {
+      const filtered = prev.filter(b => b.id !== bm.id);
+      return [...filtered, bm];
+    });
+  }, []);
+
+  return (
+    <div className="app-root">
+      <div className="screen-area">
+        {tab === 'home' && (
+          <HomeScreen
+            walking={walking} audioPlaying={audioPlaying} loading={loading}
+            currentPlace={currentPlace} sessionPlaces={sessionPlaces}
+            bookmarkCount={bookmarks.length} sessionStart={sessionStart}
+            userPos={userPos} onToggle={toggleWalk}
+            onOpenStory={() => setTab('story')}
+          />
+        )}
+        {tab === 'story' && (
+          <StoryScreen
+            messages={messages} bookmarks={bookmarks}
+            onBookmark={addBookmark}
+          />
+        )}
+        {tab === 'journal' && (
+          <JournalScreen bookmarks={bookmarks}/>
+        )}
+        {tab === 'profile' && (
+          <ProfileScreen dark={dark} setDark={setDark}/>
+        )}
+      </div>
+      <TabBar tab={tab} setTab={setTab}/>
+    </div>
+  );
+}
+
+ReactDOM.createRoot(document.getElementById('root')).render(<App/>);
+</script>
+
+<script>
+// Unregister stale service workers on startup
+if ('serviceWorker' in navigator) {
+  navigator.serviceWorker.getRegistrations().then(regs => {
+    regs.forEach(r => r.unregister());
+    if (regs.length) console.log('[WT] Unregistered', regs.length, 'SW(s)');
+  });
+}
+</script>
 </body>
 </html>
