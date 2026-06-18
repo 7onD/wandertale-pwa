@@ -135,7 +135,11 @@ html,body,#root{margin:0;padding:0;height:100%;width:100%;overflow:hidden;backgr
   </div>
   <div id="dbg-log"></div>
 </div>
-<button id="dbg-btn" onclick="document.getElementById('dbg-panel').classList.toggle('open')">🛠</button>
+<button id="dbg-btn" onclick="
+  var p = document.getElementById('dbg-panel');
+  p.classList.toggle('open');
+  window.dispatchEvent(new CustomEvent('wt-debug', {detail: p.classList.contains('open')}));
+">🛠</button>
 
 <!-- React + Babel -->
 <script src="https://unpkg.com/react@18.3.1/umd/react.development.js" integrity="sha384-hD6/rw4ppMLGNu3tX5cjIb+uRZ7UkRJ6BPkLpg4hAu/6onKUg4lLsHAs9EBPT82L" crossorigin="anonymous"></script>
@@ -263,7 +267,7 @@ function fmtTime() {
 }
 
 /* ── HomeScreen ────────────────────────────────────────────── */
-function HomeScreen({ walking, audioPlaying, loading, currentPlace, sessionPlaces, bookmarkCount, sessionStart, userPos, onToggle, onOpenStory }) {
+function HomeScreen({ walking, audioPlaying, loading, currentPlace, sessionPlaces, bookmarkCount, sessionStart, userPos, onToggle, onOpenStory, debugMode, onFakeGPS, geoError }) {
   const mapRef       = useRef(null);
   const mapInst      = useRef(null);
   const userMark     = useRef(null);
@@ -322,6 +326,20 @@ function HomeScreen({ walking, audioPlaying, loading, currentPlace, sessionPlace
     placeMark.current = L.marker([userPos.lat, userPos.lon], { icon })
       .addTo(m).bindTooltip(currentPlace.name, { permanent:false, direction:'top' });
   }, [currentPlace, userPos]);
+
+  // Debug map click — fake GPS position
+  useEffect(() => {
+    const m = mapInst.current;
+    if (!m) return;
+    if (debugMode) {
+      m.getContainer().style.cursor = 'crosshair';
+      const handler = e => onFakeGPS(e.latlng.lat, e.latlng.lng);
+      m.on('click', handler);
+      return () => { m.off('click', handler); m.getContainer().style.cursor = ''; };
+    } else {
+      m.getContainer().style.cursor = '';
+    }
+  }, [debugMode, onFakeGPS]);
 
   const isActive = walking || audioPlaying;
   const elapsed  = sessionStart ? fmtElapsed(sessionStart) : '—';
@@ -391,6 +409,18 @@ function HomeScreen({ walking, audioPlaying, loading, currentPlace, sessionPlace
         </div>
       </div>
 
+      {/* geo error banner */}
+      {geoError && (
+        <div style={{
+          background:'color-mix(in oklab, #c0392b 15%, var(--surface))',
+          border:'.5px solid #c0392b', borderRadius:14,
+          padding:'10px 14px', marginBottom:14,
+          fontFamily:'var(--sans)', fontSize:13, color:'var(--ink)', lineHeight:1.4,
+        }}>
+          ❌ {geoError}
+        </div>
+      )}
+
       {/* leaflet map */}
       <div style={{ marginBottom:16 }}>
         <div className="row" style={{ justifyContent:'space-between', marginBottom:8 }}>
@@ -399,7 +429,20 @@ function HomeScreen({ walking, audioPlaying, loading, currentPlace, sessionPlace
             {userPos.lat.toFixed(4)}°N
           </span>}
         </div>
-        <div ref={mapRef} style={{ width:'100%', aspectRatio:'1.5/1', borderRadius:20, overflow:'hidden', background:'var(--surface-2)' }}/>
+        <div style={{ position:'relative' }}>
+          <div ref={mapRef} style={{ width:'100%', aspectRatio:'1.5/1', borderRadius:20, overflow:'hidden', background:'var(--surface-2)' }}/>
+          {debugMode && (
+            <div style={{
+              position:'absolute', top:10, left:'50%', transform:'translateX(-50%)',
+              background:'color-mix(in oklab, var(--ink) 88%, transparent)',
+              color:'var(--paper)', borderRadius:20, padding:'5px 14px',
+              fontFamily:'var(--mono)', fontSize:11, letterSpacing:'.06em',
+              pointerEvents:'none', whiteSpace:'nowrap', zIndex:1000,
+            }}>
+              🛠 нажмите на карту → fake GPS
+            </div>
+          )}
+        </div>
       </div>
 
       {/* current place card */}
@@ -880,6 +923,8 @@ function App() {
     try { return JSON.parse(localStorage.getItem('wt_bookmarks') || '[]'); }
     catch { return []; }
   });
+  const [debugMode,     setDebugMode]     = useState(false);
+  const [geoError,      setGeoError]      = useState(null);
 
   const walkingRef       = useRef(false);
   const loadingRef       = useRef(false);
@@ -897,6 +942,13 @@ function App() {
   }, [dark]);
   useEffect(() => { localStorage.setItem('wt_tab', tab); }, [tab]);
   useEffect(() => { localStorage.setItem('wt_bookmarks', JSON.stringify(bookmarks)); }, [bookmarks]);
+
+  /* debug panel toggle → sync React state */
+  useEffect(() => {
+    const handler = e => setDebugMode(e.detail);
+    window.addEventListener('wt-debug', handler);
+    return () => window.removeEventListener('wt-debug', handler);
+  }, []);
 
   /* audio helpers */
   const stopAudio = useCallback(() => {
@@ -1076,11 +1128,27 @@ function App() {
       stopGPS(); stopAudio();
       walkingRef.current=false; loadingRef.current=false;
       lastPosRef.current=null; sessionPlRef.current=[];
-      setWalking(false); setLoading(false);
+      setWalking(false); setLoading(false); setGeoError(null);
       setSessionPlaces([]); setSessionStart(null); setCurrentPlace(null);
       dbg('■ Прогулка остановлена');
     } else {
-      if (!('geolocation' in navigator)) { dbg('Геолокация недоступна'); return; }
+      if (!('geolocation' in navigator)) {
+        setGeoError('Геолокация не поддерживается вашим браузером');
+        dbg('Геолокация недоступна');
+        return;
+      }
+      setGeoError(null);
+      /* check / request permission before starting */
+      if (navigator.permissions) {
+        const perm = await navigator.permissions.query({ name: 'geolocation' });
+        if (perm.state === 'denied') {
+          const msg = 'Доступ к геолокации запрещён. Разрешите в настройках браузера: Safari → Настройки → Сайты → Геолокация';
+          setGeoError(msg);
+          dbg('❌ ' + msg);
+          return;
+        }
+        /* 'prompt' — getCurrentPosition вызовет диалог сам */
+      }
       await unlockAudio();
       walkingRef.current=true;
       setWalking(true); setSessionStart(Date.now());
@@ -1088,6 +1156,14 @@ function App() {
       startGPS();
     }
   }, [stopGPS, stopAudio, unlockAudio, startGPS]);
+
+  /* debug: fake GPS from map click */
+  const onFakeGPS = useCallback((lat, lon) => {
+    setUserPos({ lat, lon });
+    lastPosRef.current = null; // force fetch even if same area
+    dbg(`📍 Fake GPS: ${lat.toFixed(5)}, ${lon.toFixed(5)} → запрос...`);
+    fetchNarration(lat, lon);
+  }, [fetchNarration]);
 
   const addBookmark = useCallback((bm) => {
     setBookmarks(prev => {
@@ -1106,6 +1182,7 @@ function App() {
             bookmarkCount={bookmarks.length} sessionStart={sessionStart}
             userPos={userPos} onToggle={toggleWalk}
             onOpenStory={() => setTab('story')}
+            debugMode={debugMode} onFakeGPS={onFakeGPS} geoError={geoError}
           />
         )}
         {tab === 'story' && (
