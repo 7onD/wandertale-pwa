@@ -1001,21 +1001,20 @@ function App() {
     setAudioPlaying(false);
   }, []);
 
-  const playBuffer = useCallback(async (arrayBuffer) => {
+  const speakText = useCallback(async (text) => {
     stopAudio();
+    if (!window.speechSynthesis) return;
     try {
-      const blob  = new Blob([arrayBuffer], { type:'audio/mpeg' });
-      const url   = URL.createObjectURL(blob);
-      const audio = new Audio(url);
-      audio.volume = 1.0;
-      audioRef.current = audio;
       await new Promise((res) => {
-        audio.onended = () => { audioPlayingRef.current=false; setAudioPlaying(false); URL.revokeObjectURL(url); dbg('▶ Audio ended'); res(); };
-        audio.onerror = (e) => { dbg('Audio error: '+(e.message||'?')); audioPlayingRef.current=false; setAudioPlaying(false); res(); };
-        audio.play().then(() => { audioPlayingRef.current=true; setAudioPlaying(true); }).catch(e => { dbg('play() failed: '+e.message); res(); });
+        const u = new SpeechSynthesisUtterance(text);
+        u.lang = 'ru-RU';
+        u.onend   = () => { audioPlayingRef.current=false; setAudioPlaying(false); dbg('▶ Speech ended'); res(); };
+        u.onerror = (e) => { dbg('Speech error: '+(e.error||'?')); audioPlayingRef.current=false; setAudioPlaying(false); res(); };
+        audioPlayingRef.current=true; setAudioPlaying(true);
+        window.speechSynthesis.speak(u);
       });
     } catch(e) {
-      dbg('playBuffer: '+e.message);
+      dbg('speakText: '+e.message);
       audioPlayingRef.current=false; setAudioPlaying(false);
     }
   }, [stopAudio]);
@@ -1057,48 +1056,6 @@ function App() {
       loadingRef.current=false; setLoading(false); return;
     }
 
-    const ct = response.headers.get('content-type') || '';
-
-    /* ── audio response ── */
-    if (ct.includes('audio/mpeg')) {
-      const name    = decodeURIComponent(response.headers.get('x-place')   || 'Место');
-      const addr    = decodeURIComponent(response.headers.get('x-address') || '');
-      const type    = decodeURIComponent(response.headers.get('x-type')    || '');
-      const narr    = response.headers.get('x-narration') || '';
-
-      dbg('📍 '+name+' · '+addr);
-
-      /* dedup */
-      if (sessionPlRef.current.find(p => p.name === name)) {
-        dbg('Already seen: '+name);
-        loadingRef.current=false; setLoading(false); return;
-      }
-
-      const placeObj = { name, address: addr, type };
-      sessionPlRef.current = [...sessionPlRef.current, placeObj].slice(-MAX_HIST);
-      setSessionPlaces([...sessionPlRef.current]);
-      setCurrentPlace(placeObj);
-      lastPosRef.current = { lat, lon };
-
-      const t = fmtTime();
-      const idx = `№ ${sessionPlRef.current.length.toString().padStart(2,'0')}`;
-      const pid = ++msgIdRef.current;
-      const mid = ++msgIdRef.current;
-      setMessages(prev => [
-        ...prev,
-        { id:pid, type:'place', index:idx, title:name, subtitle:addr, time:t },
-        { id:mid, type:'bubble', text: narr ? decodeURIComponent(narr) : '…', time:t, placeTitle:name },
-      ]);
-
-      let buf;
-      try { buf = await response.arrayBuffer(); }
-      catch(e) { dbg('arrayBuffer: '+e.message); loadingRef.current=false; setLoading(false); return; }
-
-      loadingRef.current=false; setLoading(false);
-      await playBuffer(buf);
-      return;
-    }
-
     /* ── JSON response ── */
     let data;
     try { data = await response.json(); }
@@ -1110,13 +1067,15 @@ function App() {
     }
 
     const name = data.place || 'Место рядом';
+    const addr = data.address || '';
+    const type = data.type || '';
     const narr = data.narration || '';
 
     if (sessionPlRef.current.find(p => p.name === name)) {
       loadingRef.current=false; setLoading(false); return;
     }
 
-    const placeObj = { name, address:'', type:'' };
+    const placeObj = { name, address: addr, type };
     sessionPlRef.current = [...sessionPlRef.current, placeObj].slice(-MAX_HIST);
     setSessionPlaces([...sessionPlRef.current]);
     setCurrentPlace(placeObj);
@@ -1127,17 +1086,13 @@ function App() {
     const mid = ++msgIdRef.current;
     setMessages(prev => [
       ...prev,
-      { id:pid, type:'place', index:`№ ${sessionPlRef.current.length.toString().padStart(2,'0')}`, title:name, time:t },
+      { id:pid, type:'place', index:`№ ${sessionPlRef.current.length.toString().padStart(2,'0')}`, title:name, subtitle:addr, time:t },
       { id:mid, type:'bubble', text:narr, time:t, placeTitle:name },
     ]);
     loadingRef.current=false; setLoading(false);
 
-    if (narr && data.audio === false && window.speechSynthesis) {
-      const u = new SpeechSynthesisUtterance(narr);
-      u.lang = 'ru-RU';
-      window.speechSynthesis.speak(u);
-    }
-  }, [playBuffer]);
+    if (narr) await speakText(narr);
+  }, [speakText]);
 
   /* GPS */
   const onPosition = useCallback((pos) => {
