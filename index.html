@@ -160,6 +160,7 @@ const API_BASE = window.location.hostname === 'localhost'
   ? 'http://localhost:3000'
   : 'https://wandertale-backend.onrender.com';   // ← Render.com
 const BACKEND_URL   = `${API_BASE}/narrate`;
+const TTS_URL        = `${API_BASE}/tts`;
 const MIN_DISTANCE  = 80;   // metres
 const MAX_HIST      = 20;
 const WALK_SPEED_MPS = 1.4; // ~5 km/h, average human walking speed
@@ -1072,6 +1073,7 @@ function App() {
     setAudioPlaying(false);
   }, []);
 
+  // Fallback: robotic browser TTS, used only if the Edge TTS backend call fails
   const speakText = useCallback(async (text) => {
     stopAudio();
     if (!window.speechSynthesis) return;
@@ -1089,6 +1091,43 @@ function App() {
       audioPlayingRef.current=false; setAudioPlaying(false);
     }
   }, [stopAudio]);
+
+  // Primary: Edge TTS neural voice via backend (same voice the mobile app uses)
+  const playNarration = useCallback(async (text) => {
+    stopAudio();
+    dbg('→ POST /tts (Edge TTS)...');
+    let resp;
+    try {
+      resp = await fetch(TTS_URL, {
+        method:  'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body:    JSON.stringify({ text }),
+      });
+    } catch (e) {
+      dbg('TTS fetch error: ' + e.message + ' — фолбэк на синтез речи браузера');
+      return speakText(text);
+    }
+    if (!resp.ok) {
+      dbg('TTS HTTP ' + resp.status + ' — фолбэк на синтез речи браузера');
+      return speakText(text);
+    }
+    try {
+      const buf   = await resp.arrayBuffer();
+      const blob  = new Blob([buf], { type: 'audio/mpeg' });
+      const url   = URL.createObjectURL(blob);
+      const audio = new Audio(url);
+      audioRef.current = audio;
+      await new Promise((res) => {
+        audio.onended = () => { audioPlayingRef.current=false; setAudioPlaying(false); URL.revokeObjectURL(url); dbg('▶ Edge TTS ended'); res(); };
+        audio.onerror = () => { audioPlayingRef.current=false; setAudioPlaying(false); URL.revokeObjectURL(url); res(); };
+        audioPlayingRef.current=true; setAudioPlaying(true);
+        audio.play().catch((e) => { dbg('Audio play failed: ' + e.message); res(); });
+      });
+    } catch (e) {
+      dbg('TTS playback error: ' + e.message + ' — фолбэк на синтез речи браузера');
+      return speakText(text);
+    }
+  }, [stopAudio, speakText]);
 
   const unlockAudio = useCallback(async () => {
     try {
@@ -1162,8 +1201,8 @@ function App() {
     ]);
     loadingRef.current=false; setLoading(false);
 
-    if (narr) await speakText(narr);
-  }, [speakText]);
+    if (narr) await playNarration(narr);
+  }, [playNarration]);
 
   /* GPS */
   const onPosition = useCallback((pos) => {
