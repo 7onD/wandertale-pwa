@@ -34,12 +34,29 @@
 
     <main class="app-main">
 
-      <div class="status-box" id="statusBox">
-        <span class="status-dot" id="statusDot"></span>
-        <span class="status-text" id="statusText">Нажмите на карту, чтобы выбрать точку</span>
+      <div class="mode-toggle" id="modeToggle">
+        <button class="mode-btn is-active" data-mode="route" onclick="setMode('route')">🛣 Маршрут (2 точки)</button>
+        <button class="mode-btn" data-mode="point" onclick="setMode('point')">📍 Точка (стационарно)</button>
       </div>
 
-      <button class="btn-main" id="mainBtn" onclick="toggleWalk()">
+      <div class="status-box" id="statusBox">
+        <span class="status-dot" id="statusDot"></span>
+        <span class="status-text" id="statusText">Нажмите на карту, чтобы выбрать точку А маршрута</span>
+      </div>
+
+      <div class="route-controls" id="routeControls">
+        <label for="speedSelect">Скорость симуляции:
+          <select id="speedSelect" onchange="onSpeedChange()">
+            <option value="1">Реальная (~5 км/ч)</option>
+            <option value="5">x5 ускорение</option>
+            <option value="20" selected>x20 ускорение</option>
+            <option value="60">x60 ускорение</option>
+          </select>
+        </label>
+        <button class="btn-secondary" onclick="clearRoute()">Очистить маршрут</button>
+      </div>
+
+      <button class="btn-main" id="mainBtn" onclick="toggleWalk()" hidden>
         <span class="btn-icon" id="btnIcon">▶</span>
         <span class="btn-label" id="btnLabel">Начать прогулку</span>
       </button>

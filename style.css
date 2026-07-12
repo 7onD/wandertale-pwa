@@ -119,6 +119,10 @@ body {
 }
 
 /* ── Main button ───────────────────────────────────────────────────────────── */
+.btn-main[hidden] {
+  display: none;
+}
+
 .btn-main {
   width: 100%;
   padding: 20px;
@@ -282,6 +286,74 @@ body {
 
 .card-inner.animate {
   animation: fade-in-up 0.4s ease both;
+}
+
+/* ── Mode toggle (debug) ───────────────────────────────────────────────────── */
+.mode-toggle {
+  display: flex;
+  gap: 8px;
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  padding: 4px;
+}
+
+.mode-btn {
+  flex: 1;
+  padding: 10px 8px;
+  border: none;
+  border-radius: 8px;
+  background: transparent;
+  color: var(--text-muted);
+  font-size: 0.85rem;
+  font-weight: 600;
+  cursor: pointer;
+  transition: background 0.2s, color 0.2s;
+}
+
+.mode-btn.is-active {
+  background: var(--accent);
+  color: #fff;
+}
+
+/* ── Route controls (debug) ───────────────────────────────────────────────── */
+.route-controls {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  padding: 12px 16px;
+  font-size: 0.85rem;
+  color: var(--text-muted);
+}
+
+.route-controls select {
+  background: var(--surface2);
+  color: var(--text);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  padding: 6px 8px;
+  font-size: 0.85rem;
+}
+
+.btn-secondary {
+  padding: 10px 14px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  background: var(--surface2);
+  color: var(--text);
+  font-size: 0.85rem;
+  font-weight: 600;
+  cursor: pointer;
+  white-space: nowrap;
+  transition: background 0.2s;
+}
+
+.btn-secondary:hover {
+  background: var(--border);
 }
 
 /* ── Session stats ─────────────────────────────────────────────────────────── */

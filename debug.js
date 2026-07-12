@@ -65,6 +65,20 @@ const placeIcon = L.divIcon({
   iconAnchor: [6, 6],
 });
 
+const startIcon = L.divIcon({
+  className: '',
+  html: '<div style="width:16px;height:16px;background:#22c55e;border:2px solid white;border-radius:50%;box-shadow:0 0 8px #22c55e"></div>',
+  iconSize: [16, 16],
+  iconAnchor: [8, 8],
+});
+
+const endIcon = L.divIcon({
+  className: '',
+  html: '<div style="width:16px;height:16px;background:#a855f7;border:2px solid white;border-radius:50%;box-shadow:0 0 8px #a855f7"></div>',
+  iconSize: [16, 16],
+  iconAnchor: [8, 8],
+});
+
 const map = L.map('map', { zoomControl: true, attributionControl: false });
 L.tileLayer('https://{s}.basemaps.cartocdn.com/dark_all/{z}/{x}/{y}{r}.png', {
   maxZoom: 19,
@@ -79,9 +93,42 @@ userMarker = L.marker([fakePos.lat, fakePos.lon], { icon: userIcon })
   .addTo(map)
   .bindTooltip('Фейковая позиция', { permanent: false, direction: 'top' });
 
-// ── Map click → set fake GPS ──────────────────────────────────────────────────
+// ── Mode & route-simulation state ───────────────────────────────────────────
+let debugMode = 'route'; // 'route' | 'point'
+const WALK_SPEED_MPS = 1.4; // ~5 km/h, average human walking speed
+let speedMultiplier = 20;
+
+const routeState = {
+  pointA:        null,
+  pointB:        null,
+  markerA:       null,
+  markerB:       null,
+  coords:        [],   // [{lat, lon}] from OSRM
+  cumDist:       [],   // cumulative distance (m) up to point i
+  totalDist:     0,
+  polyline:      null,
+  walkingMarker: null,
+  traveled:      0,
+  timer:         null,
+  lastTick:      null,
+  active:        false,
+};
+
+const modeToggle    = document.getElementById('modeToggle');
+const routeControls = document.getElementById('routeControls');
+const speedSelect    = document.getElementById('speedSelect');
+
+// ── Map click → route mode branches to route/point handling ────────────────
 map.on('click', (e) => {
   const { lat, lng } = e.latlng;
+  if (debugMode === 'route') {
+    handleRouteClick(lat, lng);
+  } else {
+    handlePointClick(lat, lng);
+  }
+});
+
+function handlePointClick(lat, lng) {
   fakePos = { lat, lon: lng };
   dbg('📍 Fake GPS set: ' + lat.toFixed(4) + ', ' + lng.toFixed(4));
 
@@ -95,7 +142,212 @@ map.on('click', (e) => {
   if (state.walking && !state.loading && !state.audioPlaying) {
     onPositionUpdate(lat, lng);
   }
-});
+}
+
+function handleRouteClick(lat, lng) {
+  if (routeState.active) {
+    dbg('Симуляция маршрута активна — нажмите «Очистить маршрут», чтобы начать заново');
+    return;
+  }
+  if (!routeState.pointA) {
+    routeState.pointA = { lat, lon: lng };
+    if (routeState.markerA) routeState.markerA.remove();
+    routeState.markerA = L.marker([lat, lng], { icon: startIcon })
+      .addTo(map)
+      .bindTooltip('Старт (А)', { permanent: true, direction: 'top' });
+    setStatus('Точка А задана. Нажмите вторую точку (Б) маршрута.', 'active');
+    dbg('Точка А: ' + lat.toFixed(4) + ', ' + lng.toFixed(4));
+  } else if (!routeState.pointB) {
+    routeState.pointB = { lat, lon: lng };
+    if (routeState.markerB) routeState.markerB.remove();
+    routeState.markerB = L.marker([lat, lng], { icon: endIcon })
+      .addTo(map)
+      .bindTooltip('Финиш (Б)', { permanent: true, direction: 'top' });
+    dbg('Точка Б: ' + lat.toFixed(4) + ', ' + lng.toFixed(4));
+    buildAndStartRoute();
+  }
+}
+
+// ── Route building (OSRM) + walking simulation ──────────────────────────────
+async function buildAndStartRoute() {
+  setStatus('Построение маршрута...', 'loading');
+  dbg('→ Запрос маршрута к OSRM...');
+
+  const a = routeState.pointA;
+  const b = routeState.pointB;
+  const url = `https://router.project-osrm.org/route/v1/foot/${a.lon},${a.lat};${b.lon},${b.lat}?overview=full&geometries=geojson`;
+
+  let data;
+  try {
+    const resp = await fetch(url);
+    data = await resp.json();
+  } catch (err) {
+    dbg('Ошибка OSRM: ' + err.message);
+    setStatus('Не удалось построить маршрут (OSRM недоступен)', 'error');
+    return;
+  }
+
+  if (!data.routes || !data.routes.length) {
+    dbg('OSRM: маршрут не найден');
+    setStatus('Маршрут между точками не найден', 'error');
+    return;
+  }
+
+  const route  = data.routes[0];
+  const coords = route.geometry.coordinates.map(([lon, lat]) => ({ lat, lon }));
+
+  const cum = [0];
+  for (let i = 1; i < coords.length; i++) {
+    cum.push(cum[i - 1] + haversine(coords[i - 1].lat, coords[i - 1].lon, coords[i].lat, coords[i].lon));
+  }
+
+  routeState.coords    = coords;
+  routeState.cumDist   = cum;
+  routeState.totalDist = route.distance;
+
+  if (routeState.polyline) routeState.polyline.remove();
+  routeState.polyline = L.polyline(coords.map(c => [c.lat, c.lon]), {
+    color: '#3b82f6', weight: 4, opacity: 0.8,
+  }).addTo(map);
+  map.fitBounds(routeState.polyline.getBounds(), { padding: [30, 30] });
+
+  const distKm = (routeState.totalDist / 1000).toFixed(2);
+  const etaMin = Math.round(routeState.totalDist / WALK_SPEED_MPS / 60);
+  dbg(`Маршрут построен: ${distKm} км, ~${etaMin} мин пешком`);
+
+  startRouteSimulation();
+}
+
+function startRouteSimulation() {
+  routeState.traveled = 0;
+  routeState.active   = true;
+  routeState.lastTick = performance.now();
+
+  state.lastRequestPos = null;
+  state.sessionPlaces  = [];
+  updateStats();
+
+  if (routeState.walkingMarker) routeState.walkingMarker.remove();
+  if (userMarker) { userMarker.remove(); userMarker = null; }
+
+  const start = routeState.coords[0];
+  routeState.walkingMarker = L.marker([start.lat, start.lon], { icon: userIcon })
+    .addTo(map)
+    .bindTooltip('Симуляция ходьбы', { permanent: false, direction: 'top' });
+
+  dbg('▶ Симуляция ходьбы запущена (x' + speedMultiplier + ')');
+  routeState.timer = setInterval(routeTick, 200);
+}
+
+function routeTick() {
+  const now = performance.now();
+  const dt  = (now - routeState.lastTick) / 1000;
+  routeState.lastTick = now;
+
+  routeState.traveled += WALK_SPEED_MPS * speedMultiplier * dt;
+
+  if (routeState.traveled >= routeState.totalDist) {
+    const last = routeState.coords[routeState.coords.length - 1];
+    routeState.walkingMarker.setLatLng([last.lat, last.lon]);
+    fakePos = last;
+    onPositionUpdate(last.lat, last.lon);
+    finishRoute();
+    return;
+  }
+
+  const pos = interpolateRoutePosition(routeState.traveled);
+  routeState.walkingMarker.setLatLng([pos.lat, pos.lon]);
+  fakePos = pos;
+
+  onPositionUpdate(pos.lat, pos.lon);
+
+  if (!state.loading && !state.audioPlaying) {
+    const pct = Math.round((routeState.traveled / routeState.totalDist) * 100);
+    setStatus(`Симуляция маршрута: ${pct}%`, 'active');
+  }
+}
+
+function interpolateRoutePosition(dist) {
+  const cum = routeState.cumDist;
+  let i = 1;
+  while (i < cum.length && cum[i] < dist) i++;
+  if (i >= cum.length) return routeState.coords[routeState.coords.length - 1];
+
+  const segStart = cum[i - 1];
+  const segEnd   = cum[i];
+  const t = segEnd === segStart ? 0 : (dist - segStart) / (segEnd - segStart);
+  const p1 = routeState.coords[i - 1];
+  const p2 = routeState.coords[i];
+  return {
+    lat: p1.lat + (p2.lat - p1.lat) * t,
+    lon: p1.lon + (p2.lon - p1.lon) * t,
+  };
+}
+
+function finishRoute() {
+  if (routeState.timer) clearInterval(routeState.timer);
+  routeState.timer   = null;
+  routeState.active  = false;
+  dbg('Маршрут завершён');
+  setStatus('Маршрут завершён. Нажмите «Очистить маршрут» для нового.', 'idle');
+}
+
+function clearRoute() {
+  if (routeState.timer) clearInterval(routeState.timer);
+  stopAllAudio();
+
+  if (routeState.markerA)       routeState.markerA.remove();
+  if (routeState.markerB)       routeState.markerB.remove();
+  if (routeState.polyline)      routeState.polyline.remove();
+  if (routeState.walkingMarker) routeState.walkingMarker.remove();
+
+  routeState.pointA        = null;
+  routeState.pointB        = null;
+  routeState.markerA       = null;
+  routeState.markerB       = null;
+  routeState.polyline      = null;
+  routeState.walkingMarker = null;
+  routeState.coords        = [];
+  routeState.cumDist       = [];
+  routeState.totalDist     = 0;
+  routeState.traveled      = 0;
+  routeState.timer         = null;
+  routeState.active        = false;
+
+  if (placeMarker) { placeMarker.remove(); placeMarker = null; }
+  if (!userMarker) {
+    userMarker = L.marker([fakePos.lat, fakePos.lon], { icon: userIcon }).addTo(map);
+  }
+
+  state.lastRequestPos = null;
+  state.sessionPlaces  = [];
+  updateStats();
+  showPlaceholder();
+  setStatus('Нажмите на карту, чтобы выбрать точку А маршрута', 'idle');
+}
+
+function setMode(mode) {
+  if (routeState.active || state.walking) {
+    dbg('Сначала остановите текущую симуляцию, затем меняйте режим');
+    return;
+  }
+  debugMode = mode;
+  document.querySelectorAll('.mode-btn').forEach(b => {
+    b.classList.toggle('is-active', b.dataset.mode === mode);
+  });
+  routeControls.hidden = mode !== 'route';
+  mainBtn.hidden        = mode !== 'point';
+
+  clearRoute();
+  if (mode === 'point') {
+    setStatus('Нажмите на карту, чтобы выбрать точку', 'idle');
+  }
+}
+
+function onSpeedChange() {
+  speedMultiplier = Number(speedSelect.value);
+  dbg('Множитель скорости симуляции: x' + speedMultiplier);
+}
 
 // ── Haversine formula (returns metres) ───────────────────────────────────────
 function haversine(lat1, lon1, lat2, lon2) {
