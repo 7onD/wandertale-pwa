@@ -162,6 +162,7 @@ const API_BASE = window.location.hostname === 'localhost'
 const BACKEND_URL   = `${API_BASE}/narrate`;
 const MIN_DISTANCE  = 80;   // metres
 const MAX_HIST      = 20;
+const WALK_SPEED_MPS = 1.4; // ~5 km/h, average human walking speed
 
 /* ── Debug ─────────────────────────────────────────────────── */
 function dbg(msg) {
@@ -255,6 +256,16 @@ function haversine(lat1, lon1, lat2, lon2) {
   return R * 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1-a));
 }
 
+function interpolateRoute(coords, cumDist, dist) {
+  let i = 1;
+  while (i < cumDist.length && cumDist[i] < dist) i++;
+  if (i >= cumDist.length) return coords[coords.length - 1];
+  const segStart = cumDist[i-1], segEnd = cumDist[i];
+  const t = segEnd === segStart ? 0 : (dist - segStart) / (segEnd - segStart);
+  const p1 = coords[i-1], p2 = coords[i];
+  return { lat: p1.lat + (p2.lat-p1.lat)*t, lon: p1.lon + (p2.lon-p1.lon)*t };
+}
+
 function fmtElapsed(startMs) {
   const s = Math.floor((Date.now() - startMs) / 1000);
   if (s < 60) return `${s}с`;
@@ -267,11 +278,14 @@ function fmtTime() {
 }
 
 /* ── HomeScreen ────────────────────────────────────────────── */
-function HomeScreen({ walking, audioPlaying, loading, currentPlace, sessionPlaces, bookmarkCount, sessionStart, userPos, onToggle, onPauseAudio, onOpenStory, debugMode, onFakeGPS, geoError, messages, onBookmark, bookmarks }) {
+function HomeScreen({ walking, audioPlaying, loading, currentPlace, sessionPlaces, bookmarkCount, sessionStart, userPos, onToggle, onPauseAudio, onOpenStory, debugMode, onDebugMapClick, onClearDebugRoute, debugRouteA, debugRouteB, debugRouteCoords, debugRouteHint, geoError, messages, onBookmark, bookmarks }) {
   const mapRef       = useRef(null);
   const mapInst      = useRef(null);
   const userMark     = useRef(null);
   const placeMark    = useRef(null);
+  const routeMarkA   = useRef(null);
+  const routeMarkB   = useRef(null);
+  const routeLine    = useRef(null);
   const [clock,    setClock]    = useState(fmtTime());
   const [pinSheet, setPinSheet] = useState(false);
 
@@ -291,7 +305,7 @@ function HomeScreen({ walking, audioPlaying, loading, currentPlace, sessionPlace
       : 'https://{s}.basemaps.cartocdn.com/light_all/{z}/{x}/{y}{r}.png';
     const m = L.map(el, { zoomControl:false, attributionControl:false, dragging:true });
     L.tileLayer(tileUrl, { maxZoom:19 }).addTo(m);
-    m.setView([55.75, 37.61], 14);
+    m.setView([59.9386, 30.3141], 14); // Saint Petersburg — default when geolocation is unavailable
     mapInst.current = m;
     return () => { m.remove(); mapInst.current = null; userMark.current = null; placeMark.current = null; };
   }, []);
@@ -328,19 +342,63 @@ function HomeScreen({ walking, audioPlaying, loading, currentPlace, sessionPlace
       .addTo(m).bindTooltip(currentPlace.name, { permanent:false, direction:'top' });
   }, [currentPlace, userPos]);
 
-  // Debug map click — fake GPS position
+  // Debug map click — two clicks mark a route (А → Б)
   useEffect(() => {
     const m = mapInst.current;
     if (!m) return;
     if (debugMode) {
       m.getContainer().style.cursor = 'crosshair';
-      const handler = e => onFakeGPS(e.latlng.lat, e.latlng.lng);
+      const handler = e => onDebugMapClick(e.latlng.lat, e.latlng.lng);
       m.on('click', handler);
       return () => { m.off('click', handler); m.getContainer().style.cursor = ''; };
     } else {
       m.getContainer().style.cursor = '';
     }
-  }, [debugMode, onFakeGPS]);
+  }, [debugMode, onDebugMapClick]);
+
+  // Debug route markers (А / Б)
+  useEffect(() => {
+    const m = mapInst.current;
+    if (!m) return;
+    if (routeMarkA.current) { routeMarkA.current.remove(); routeMarkA.current = null; }
+    if (debugRouteA) {
+      const icon = L.divIcon({
+        className:'',
+        html:'<div style="width:16px;height:16px;background:#22c55e;border:2px solid #fff;border-radius:50%;box-shadow:0 0 8px #22c55e"></div>',
+        iconSize:[16,16], iconAnchor:[8,8],
+      });
+      routeMarkA.current = L.marker([debugRouteA.lat, debugRouteA.lon], { icon })
+        .addTo(m).bindTooltip('А', { permanent:true, direction:'top' });
+    }
+  }, [debugRouteA]);
+
+  useEffect(() => {
+    const m = mapInst.current;
+    if (!m) return;
+    if (routeMarkB.current) { routeMarkB.current.remove(); routeMarkB.current = null; }
+    if (debugRouteB) {
+      const icon = L.divIcon({
+        className:'',
+        html:'<div style="width:16px;height:16px;background:#a855f7;border:2px solid #fff;border-radius:50%;box-shadow:0 0 8px #a855f7"></div>',
+        iconSize:[16,16], iconAnchor:[8,8],
+      });
+      routeMarkB.current = L.marker([debugRouteB.lat, debugRouteB.lon], { icon })
+        .addTo(m).bindTooltip('Б', { permanent:true, direction:'top' });
+    }
+  }, [debugRouteB]);
+
+  // Debug route polyline
+  useEffect(() => {
+    const m = mapInst.current;
+    if (!m) return;
+    if (routeLine.current) { routeLine.current.remove(); routeLine.current = null; }
+    if (debugRouteCoords && debugRouteCoords.length > 1) {
+      routeLine.current = L.polyline(debugRouteCoords.map(c => [c.lat, c.lon]), {
+        color:'#3b82f6', weight:4, opacity:0.8,
+      }).addTo(m);
+      m.fitBounds(routeLine.current.getBounds(), { padding:[24,24] });
+    }
+  }, [debugRouteCoords]);
 
   const isActive = walking || audioPlaying;
   const elapsed  = sessionStart ? fmtElapsed(sessionStart) : '—';
@@ -435,12 +493,20 @@ function HomeScreen({ walking, audioPlaying, loading, currentPlace, sessionPlace
           {debugMode && (
             <div style={{
               position:'absolute', top:10, left:'50%', transform:'translateX(-50%)',
+              display:'flex', alignItems:'center', gap:8,
               background:'color-mix(in oklab, var(--ink) 88%, transparent)',
-              color:'var(--paper)', borderRadius:20, padding:'5px 14px',
+              color:'var(--paper)', borderRadius:20, padding:'5px 8px 5px 14px',
               fontFamily:'var(--mono)', fontSize:11, letterSpacing:'.06em',
-              pointerEvents:'none', whiteSpace:'nowrap', zIndex:1000,
+              whiteSpace:'nowrap', zIndex:1000,
             }}>
-              🛠 нажмите на карту → fake GPS
+              <span style={{ pointerEvents:'none' }}>🛠 {debugRouteHint}</span>
+              {(debugRouteA || debugRouteB) && (
+                <button onClick={onClearDebugRoute} style={{
+                  background:'rgba(255,255,255,.15)', border:0, color:'var(--paper)',
+                  borderRadius:14, padding:'3px 9px', fontSize:10, cursor:'pointer',
+                  fontFamily:'var(--mono)',
+                }}>✕ сброс</button>
+              )}
             </div>
           )}
         </div>
@@ -968,6 +1034,11 @@ function App() {
   });
   const [debugMode,     setDebugMode]     = useState(false);
   const [geoError,      setGeoError]      = useState(null);
+  const [debugRouteA,      setDebugRouteA]      = useState(null);
+  const [debugRouteB,      setDebugRouteB]      = useState(null);
+  const [debugRouteCoords, setDebugRouteCoords] = useState([]);
+  const [debugRouteHint,   setDebugRouteHint]   = useState('нажмите на карту → точка А маршрута');
+  const routeSimRef = useRef({ timer:null, coords:[], cumDist:[], totalDist:0, traveled:0, lastTick:0 });
 
   const walkingRef       = useRef(false);
   const loadingRef       = useRef(false);
@@ -1153,13 +1224,123 @@ function App() {
     }
   }, [stopGPS, stopAudio, unlockAudio, startGPS]);
 
-  /* debug: fake GPS from map click */
-  const onFakeGPS = useCallback((lat, lon) => {
-    setUserPos({ lat, lon });
-    lastPosRef.current = null; // force fetch even if same area
-    dbg(`📍 Fake GPS: ${lat.toFixed(5)}, ${lon.toFixed(5)} → запрос...`);
-    fetchNarration(lat, lon);
+  /* debug: route tick — advance the simulated walker along the route */
+  const routeTick = useCallback(() => {
+    const rs = routeSimRef.current;
+    if (!rs.timer) return;
+    const now = performance.now();
+    const dt  = (now - rs.lastTick) / 1000;
+    rs.lastTick = now;
+    rs.traveled += WALK_SPEED_MPS * dt;
+
+    const atEnd = rs.traveled >= rs.totalDist;
+    const pos   = atEnd ? rs.coords[rs.coords.length - 1] : interpolateRoute(rs.coords, rs.cumDist, rs.traveled);
+
+    setUserPos(pos);
+    if (!loadingRef.current && !audioPlayingRef.current) {
+      if (!lastPosRef.current || haversine(lastPosRef.current.lat, lastPosRef.current.lon, pos.lat, pos.lon) >= MIN_DISTANCE) {
+        fetchNarration(pos.lat, pos.lon);
+      }
+    }
+
+    if (atEnd) {
+      clearInterval(rs.timer);
+      rs.timer = null;
+      dbg('🏁 Маршрут пройден');
+      setDebugRouteHint('Маршрут пройден. Нажмите «✕ сброс» для нового.');
+    } else {
+      const pct = Math.round((rs.traveled / rs.totalDist) * 100);
+      setDebugRouteHint(`Симуляция ходьбы: ${pct}%`);
+    }
   }, [fetchNarration]);
+
+  /* debug: build a walking route via OSRM and start the simulation */
+  const startDebugRoute = useCallback(async (a, b) => {
+    setDebugRouteHint('Строю маршрут...');
+    dbg('→ Запрос маршрута к OSRM...');
+    let data;
+    try {
+      const resp = await fetch(`https://router.project-osrm.org/route/v1/foot/${a.lon},${a.lat};${b.lon},${b.lat}?overview=full&geometries=geojson`);
+      data = await resp.json();
+    } catch (e) {
+      dbg('OSRM error: ' + e.message);
+      setDebugRouteHint('Не удалось построить маршрут (OSRM недоступен)');
+      return;
+    }
+    if (!data.routes || !data.routes.length) {
+      dbg('OSRM: маршрут не найден');
+      setDebugRouteHint('Маршрут между точками не найден');
+      return;
+    }
+    const route  = data.routes[0];
+    const coords = route.geometry.coordinates.map(([lon, lat]) => ({ lat, lon }));
+    const cum = [0];
+    for (let i = 1; i < coords.length; i++) {
+      cum.push(cum[i-1] + haversine(coords[i-1].lat, coords[i-1].lon, coords[i].lat, coords[i].lon));
+    }
+    setDebugRouteCoords(coords);
+
+    const distKm = (route.distance / 1000).toFixed(2);
+    const etaMin = Math.round(route.distance / WALK_SPEED_MPS / 60);
+    dbg(`✅ Маршрут: ${distKm} км, ~${etaMin} мин пешком — симуляция запущена`);
+
+    lastPosRef.current   = null;
+    sessionPlRef.current = [];
+    setSessionPlaces([]);
+
+    routeSimRef.current = { coords, cumDist: cum, totalDist: route.distance, traveled: 0, lastTick: performance.now(), timer: null };
+    routeSimRef.current.timer = setInterval(routeTick, 200);
+    setDebugRouteHint(`${distKm} км, ~${etaMin} мин · Симуляция: 0%`);
+  }, [routeTick]);
+
+  /* debug: map click → mark А, then Б, then auto-build + simulate the route */
+  const onDebugMapClick = useCallback((lat, lon) => {
+    if (routeSimRef.current.timer) {
+      dbg('Симуляция активна — сначала нажмите «✕ сброс»');
+      return;
+    }
+    if (!debugRouteA) {
+      setDebugRouteA({ lat, lon });
+      setDebugRouteHint('Точка А задана — нажмите точку Б маршрута');
+      dbg(`📍 Точка А: ${lat.toFixed(5)}, ${lon.toFixed(5)}`);
+      return;
+    }
+    if (!debugRouteB) {
+      const b = { lat, lon };
+      setDebugRouteB(b);
+      dbg(`📍 Точка Б: ${lat.toFixed(5)}, ${lon.toFixed(5)}`);
+      startDebugRoute(debugRouteA, b);
+      return;
+    }
+    setDebugRouteA({ lat, lon });
+    setDebugRouteB(null);
+    setDebugRouteCoords([]);
+    setDebugRouteHint('Точка А задана — нажмите точку Б маршрута');
+    dbg(`📍 Новая точка А: ${lat.toFixed(5)}, ${lon.toFixed(5)}`);
+  }, [debugRouteA, debugRouteB, startDebugRoute]);
+
+  /* debug: clear route + stop simulation */
+  const clearDebugRoute = useCallback(() => {
+    if (routeSimRef.current.timer) clearInterval(routeSimRef.current.timer);
+    routeSimRef.current = { timer:null, coords:[], cumDist:[], totalDist:0, traveled:0, lastTick:0 };
+    setDebugRouteA(null);
+    setDebugRouteB(null);
+    setDebugRouteCoords([]);
+    setDebugRouteHint('нажмите на карту → точка А маршрута');
+    stopAudio();
+    lastPosRef.current   = null;
+    sessionPlRef.current = [];
+    setSessionPlaces([]);
+    setCurrentPlace(null);
+    dbg('Маршрут сброшен');
+  }, [stopAudio]);
+
+  /* stop route simulation when debug panel is closed */
+  useEffect(() => {
+    if (!debugMode && routeSimRef.current.timer) {
+      clearDebugRoute();
+    }
+  }, [debugMode, clearDebugRoute]);
 
   const addBookmark = useCallback((bm) => {
     setBookmarks(prev => {
@@ -1182,7 +1363,9 @@ function App() {
             bookmarkCount={bookmarks.length} sessionStart={sessionStart}
             userPos={userPos} onToggle={toggleWalk} onPauseAudio={stopAudio}
             onOpenStory={() => setTab('story')}
-            debugMode={debugMode} onFakeGPS={onFakeGPS} geoError={geoError}
+            debugMode={debugMode} onDebugMapClick={onDebugMapClick} onClearDebugRoute={clearDebugRoute}
+            debugRouteA={debugRouteA} debugRouteB={debugRouteB} debugRouteCoords={debugRouteCoords}
+            debugRouteHint={debugRouteHint} geoError={geoError}
             messages={messages} onBookmark={addBookmark} bookmarks={bookmarks}
           />
         )}
